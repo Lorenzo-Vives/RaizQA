@@ -1,0 +1,34 @@
+[
+  {
+    "code": "egyptology",
+    "n": "1",
+    "memo": "",
+    "children": [
+      {
+        "code": "Tutankhamun",
+        "n": "0",
+        "memo": "",
+        "children": [
+          {
+            "code": "b",
+            "n": "0",
+            "memo": "",
+            "children": []
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "code": "GEM",
+    "n": "1",
+    "memo": "",
+    "children": []
+  },
+  {
+    "code": "Tutankhamun",
+    "n": "1",
+    "memo": "",
+    "children": []
+  }
+]
