@@ -15,9 +15,11 @@
 ---
 
 ### ⚙️ Instalación
-1. Descarga el archivo `.exe` desde el enlace de arriba  
-2. Ejecuta el programa (no requiere instalación adicional)  
-3. ¡Comienza a analizar tus datos cualitativos!
+1. Descarga el archivo `.exe` desde el enlace de arriba
+    ⚠️ Nota: Windows puede advertirte al abrir el programa porque es nuevo.
+     *debes presionar "Más información --> Ejecutar de todas formas"*
+3. Ejecuta el programa (no requiere instalación adicional)  
+4. ¡Comienza a analizar tus datos cualitativos!
 
 ---
 
