@@ -1,56 +1,64 @@
-# RaizQA
+RaizQA 🌱
 
-Aplicación de escritorio para organizar proyectos de análisis cualitativo con PySide6. Permite importar documentos de texto (TXT, PDF o DOCX), subrayar fragmentos, asignar códigos jerárquicos y redactar memos vinculados a cada código.
+RaizQA es un programa de análisis cualitativo open source desarrollado en Python con PySide6, creado con la ayuda de CodexAI y ChatGPT-5.
+El software fue creado por Lorenzo Vives, Sociólogo y Magíster en Sociología (PUC).
 
-## Requisitos
+📥 Instalación
 
-- Python 3.10 o superior (se probó con 3.13)
-- Pip para instalar dependencias
-- Sistema operativo con entorno gráfico (Windows, macOS o Linux con X11/Wayland)
+Descarga la última versión desde el siguiente enlace:
 
-## Instalación rápida
+➡️ RaizQA v1.2 — Descargar .exe
 
-```bash
-python -m venv venv
-venv\Scripts\activate           # En Linux/macOS usar: source venv/bin/activate
-pip install -r requirements.txt
-python main.py
-```
+⚠️ Nota: Windows podría mostrar una advertencia al ejecutar el archivo. Para continuar:
+Más información → Ejecutar de todas formas.
 
-## Flujo básico de uso
+🧭 Flujo básico de uso
 
-1. Ejecuta `python main.py` para abrir el asistente de bienvenida.
-2. Selecciona un **Working Directory** donde se crearán las carpetas de los proyectos.
-3. Crea un proyecto nuevo o abre uno existente desde la ventana principal.
-4. Importa documentos (`.txt`, `.pdf`, `.docx`). Se convertirán a texto plano y quedarán disponibles en la lista de documentos.
-5. Selecciona fragmentos en el visor de texto para crear códigos principales o subcódigos y verlos en el árbol jerárquico.
-6. Haz clic derecho en el árbol de códigos para crear/editar memos con corrector ortográfico.
-7. Usa el botón “Ver Códigos” para abrir el visor que lista todos los fragmentos codificados.
+Selecciona un Working Directory, donde se crearán automáticamente las carpetas de los proyectos.
 
-## Estructura de proyecto
+Crea un proyecto nuevo o abre uno existente desde la ventana principal.
 
-Cada proyecto vive dentro del directorio de trabajo elegido y sigue esta estructura:
+Importa documentos en formato .txt, .pdf o .docx.
 
-```
-<working_dir>/<nombre_proyecto>/
-├── documentos/           # Documentos importados convertidos a .txt
-├── codigos/              # (Reservado para exportes por documento)
-├── memos.json            # Memos administrados por código
-└── project_data.json     # Códigos, documentos y subrayados de la sesión
-```
+Todos los archivos serán convertidos a texto plano y aparecerán en la lista de documentos.
 
-Los memos y el resto de los datos se guardan automáticamente cada 30 segundos y también cuando se accionan las operaciones principales (crear código, importar documento, etc.).
+Selecciona fragmentos en el visor de texto para crear códigos y subcódigos, visibles en el árbol jerárquico.
 
-## Módulos relevantes
+Haz clic derecho en el árbol de códigos para crear o editar memos, con corrector ortográfico integrado.
 
-- `main.py`: punto de entrada de la aplicación.
-- `gui/main_window.py`: ventana principal con todo el flujo de trabajo.
-- `core/project.py`: administra la persistencia de documentos, códigos y resaltados.
-- `core/memos.py`: almacenamiento de memos en formato JSON.
-- `code_viewer/code_viewer.py`: visor de fragmentos codificados.
+Usa el botón “Ver Códigos” para abrir el visor con todos los fragmentos codificados.
 
-## Próximos pasos sugeridos
+🧰 Tecnologías utilizadas
 
-- Añadir un script de empaquetado (PyInstaller) para distribuir ejecutables.
-- Crear datos de demostración en `data/` para nuevos usuarios.
-- Automatizar pruebas unitarias sobre `core/` para asegurar la persistencia.
+Python
+
+PySide6
+
+Herramientas de IA: CodexAI y ChatGPT-5
+
+📄 Licencia
+
+Este proyecto utiliza la Licencia MIT.
+
+MIT License
+MIT License
+
+Copyright (c) 2025 Lorenzo Vives
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
