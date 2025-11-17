@@ -9,7 +9,7 @@ Descarga la última versión desde el siguiente enlace:
 
 ➡️ RaizQA v1.2 — Descargar .exe
 
-##⚠️ Nota: Windows podría mostrar una advertencia al ejecutar el archivo. Para continuar:
+## ⚠️ Nota: Windows podría mostrar una advertencia al ejecutar el archivo. Para continuar:
 Más información → Ejecutar de todas formas.
 
 ## Flujo básico de uso
