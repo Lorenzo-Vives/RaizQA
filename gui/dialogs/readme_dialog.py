@@ -19,7 +19,8 @@ class ReadmeDialog(QDialog):
             <li>Importar documentos (.txt, .pdf, .docx)</li>
             <li>Crear y organizar códigos y subcódigos</li>
             <li>Guardar fragmentos de texto codificados</li>
-            <li>Escribir memos analíticos con corrector ortográfico</li>
+            <li>Escribir memos analíticos</li>
+            <li>Desarrollar un diario de tu proyecto</li>
             <li>Visualizar los códigos y fragmentos asociados</li>
         </ul>
 
@@ -36,7 +37,7 @@ class ReadmeDialog(QDialog):
         <p>Tu proyecto se guarda automáticamente cada 30 segundos.</p>
 
         <p style='color:gray; font-size:10pt; margin-top:20px;'>
-        Versión 1.2 — desarrollado en Python + PySide6 con ayuda de Codex y ChatGPT-5.
+        Versión 1.3 — desarrollado en Python + PySide6 con ayuda de Codex y ChatGPT-5.
         </p>
         """
 

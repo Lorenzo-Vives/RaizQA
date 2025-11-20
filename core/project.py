@@ -52,6 +52,25 @@ class Project:
             return json.load(f)
 
     # ------------------------------------------------------------------
+    # DIARIO DE CODIFICACIÓN
+    # ------------------------------------------------------------------
+    def get_diary_path(self):
+        return os.path.join(self.path, "diario.txt")
+
+    def load_diary(self):
+        diary_path = self.get_diary_path()
+        if not os.path.exists(diary_path):
+            return ""
+        with open(diary_path, "r", encoding="utf-8") as f:
+            return f.read()
+
+    def save_diary(self, text):
+        diary_path = self.get_diary_path()
+        os.makedirs(self.path, exist_ok=True)
+        with open(diary_path, "w", encoding="utf-8") as f:
+            f.write(text or "")
+
+    # ------------------------------------------------------------------
     # DOCUMENTOS
     # ------------------------------------------------------------------
     def import_document(self, file_path):

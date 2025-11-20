@@ -1,17 +1,19 @@
 import os
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QListWidget, QTextEdit, QFileDialog, QMessageBox, QInputDialog,
     QTreeWidget, QTreeWidgetItem, QMenu, QDialog, QHeaderView, QTreeWidgetItemIterator,
     QGridLayout, QDialogButtonBox
 )
-from PySide6.QtGui import QColor, QTextCursor, QTextCharFormat, QPainter, QPixmap, QIcon
+from PySide6.QtGui import QColor, QTextCursor, QTextCharFormat, QPainter, QPixmap, QIcon, QPalette
 from PySide6.QtCore import Qt, QTimer
 
 from gui.dialogs.memo_dialog import MemoDialog
 from gui.dialogs.fragments_dialog import CodeFragmentsDialog
+from gui.dialogs.diary_dialog import DiaryDialog
 from code_viewer.code_viewer import CodeViewerWindow  # Absolute import desde root
 from core.project import Project
+from gui.theme import get_theme
 
 class RaizQAGUI(QMainWindow):
     AUTO_SAVE_INTERVAL = 30000
@@ -41,44 +43,59 @@ class RaizQAGUI(QMainWindow):
         self.highlights = {}        # todos los subrayados por documento
         self.highlighted = []       # subrayados del documento actual
         self._color_index = 0
+        self.is_dark_mode = False
 
         # -------------------- LAYOUT PRINCIPAL --------------------
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout()
-        top_layout = QHBoxLayout()
+        top_container = QVBoxLayout()
+        top_row = QHBoxLayout()
+        bottom_row = QHBoxLayout()
         middle_layout = QHBoxLayout()
         central_widget.setLayout(main_layout)
 
         # -------------------- TOP --------------------
         self.btn_working_dir = QPushButton("Seleccionar Working Directory")
         self.btn_working_dir.clicked.connect(self.select_working_dir)
-        top_layout.addWidget(self.btn_working_dir)
+        top_row.addWidget(self.btn_working_dir)
 
         self.btn_create = QPushButton("Crear Proyecto")
         self.btn_create.clicked.connect(self.create_project)
-        top_layout.addWidget(self.btn_create)
+        top_row.addWidget(self.btn_create)
 
         self.btn_open = QPushButton("Abrir Proyecto")
         self.btn_open.clicked.connect(self.open_project)
-        top_layout.addWidget(self.btn_open)
+        top_row.addWidget(self.btn_open)
 
         self.btn_import_doc = QPushButton("Importar Archivo")
         self.btn_import_doc.clicked.connect(self.import_file)
-        top_layout.addWidget(self.btn_import_doc)
+        top_row.addWidget(self.btn_import_doc)
 
         self.btn_save = QPushButton("💾 Guardar Proyecto")
         self.btn_save.clicked.connect(self.save_project)
-        top_layout.addWidget(self.btn_save)
+        top_row.addWidget(self.btn_save)
 
         self.btn_view_codes = QPushButton("📚 Ver Códigos")
         self.btn_view_codes.clicked.connect(self.open_code_viewer)
-        top_layout.addWidget(self.btn_view_codes)
+        top_row.addWidget(self.btn_view_codes)
 
-        top_layout.addStretch()
+        self.btn_toggle_theme = QPushButton("Modo oscuro")
+        self.btn_toggle_theme.clicked.connect(self.toggle_theme)
+        top_row.addWidget(self.btn_toggle_theme)
+
+        top_row.addStretch()
         self.lbl_project = QLabel("Proyecto: Ninguno")
-        top_layout.addWidget(self.lbl_project)
-        main_layout.addLayout(top_layout)
+        top_row.addWidget(self.lbl_project)
+        top_container.addLayout(top_row)
+
+        self.btn_diary = QPushButton("📓 Diario de codificación")
+        self.btn_diary.clicked.connect(self.open_diary)
+        bottom_row.addWidget(self.btn_diary)
+        bottom_row.addStretch()
+        top_container.addLayout(bottom_row)
+
+        main_layout.addLayout(top_container)
 
         # -------------------- MIDDLE --------------------
         left_layout = QVBoxLayout()
@@ -118,6 +135,103 @@ class RaizQAGUI(QMainWindow):
         self.auto_save_timer = QTimer(self)
         self.auto_save_timer.timeout.connect(self.auto_save)
         self.auto_save_timer.start(self.AUTO_SAVE_INTERVAL)
+
+        self.apply_theme()
+
+    # -------------------- TEMA --------------------
+    def toggle_theme(self):
+        self.is_dark_mode = not self.is_dark_mode
+        self.apply_theme()
+
+    def _current_theme(self):
+        return get_theme(self.is_dark_mode)
+
+    def apply_theme(self):
+        theme = self._current_theme()
+        highlight_text = "#0b0b0b" if self.is_dark_mode else "#ffffff"
+
+        palette = QPalette()
+        palette.setColor(QPalette.Window, QColor(theme["window_bg"]))
+        palette.setColor(QPalette.Base, QColor(theme["text_bg"]))
+        palette.setColor(QPalette.AlternateBase, QColor(theme["panel_bg"]))
+        palette.setColor(QPalette.Text, QColor(theme["text_fg"]))
+        palette.setColor(QPalette.Button, QColor(theme["button_bg"]))
+        palette.setColor(QPalette.ButtonText, QColor(theme["button_fg"]))
+        palette.setColor(QPalette.Highlight, QColor(theme["selection"]))
+        palette.setColor(QPalette.HighlightedText, QColor(highlight_text))
+
+        app = QApplication.instance()
+        if app:
+            app.setPalette(palette)
+        self.setPalette(palette)
+
+        if hasattr(self, "btn_toggle_theme"):
+            self.btn_toggle_theme.setText("Modo claro" if self.is_dark_mode else "Modo oscuro")
+
+        base_styles = f"""
+            QMainWindow {{
+                background-color: {theme['window_bg']};
+                color: {theme['text_fg']};
+            }}
+            QLabel {{
+                color: {theme['text_fg']};
+            }}
+            QPushButton {{
+                background-color: {theme['button_bg']};
+                color: {theme['button_fg']};
+                border: 1px solid {theme['border']};
+                padding: 6px 10px;
+                border-radius: 6px;
+            }}
+            QPushButton:hover {{
+                background-color: {theme['selection']};
+                color: {highlight_text};
+            }}
+        """
+        self.setStyleSheet(base_styles)
+
+        self.text_area.setStyleSheet(
+            f"background-color: {theme['text_bg']}; color: {theme['text_fg']}; "
+            f"border: 1px solid {theme['border']}; padding: 8px; "
+            f"selection-background-color: {theme['selection']}; selection-color: {highlight_text};"
+        )
+
+        self.doc_list.setStyleSheet(
+            f"""
+            QListWidget {{
+                background-color: {theme['list_bg']};
+                color: {theme['list_fg']};
+                border: 1px solid {theme['border']};
+            }}
+            QListWidget::item:selected {{
+                background-color: {theme['selection']};
+                color: {highlight_text};
+            }}
+            """
+        )
+
+        self.code_tree.setStyleSheet(
+            f"""
+            QTreeWidget {{
+                background-color: {theme['tree_bg']};
+                color: {theme['tree_fg']};
+                border: 1px solid {theme['border']};
+            }}
+            QTreeWidget::item:selected {{
+                background-color: {theme['selection']};
+                color: {highlight_text};
+            }}
+            """
+        )
+
+        self.lbl_working_dir.setStyleSheet(
+            f"font-size: 10px; color: {theme['muted_text']}; margin-top: -10px;"
+        )
+
+        self.lbl_project.setStyleSheet(f"color: {theme['text_fg']}; font-weight: bold;")
+
+        self._refresh_code_tree_colors()
+        self.restore_highlights()
 
     # -------------------- MEMOS --------------------
     def code_tree_context_menu(self, pos):
@@ -172,6 +286,27 @@ class RaizQAGUI(QMainWindow):
             return
         self.memo_manager.delete_memo(code_name)
         self.update_memo_icon(code_name, has_memo=False)
+
+    # -------------------- DIARIO --------------------
+    def open_diary(self):
+        if not self.current_project:
+            QMessageBox.information(self, "Diario", "Abre o crea un proyecto para usar el diario.")
+            return
+
+        try:
+            diary_text = self.current_project.load_diary()
+        except Exception as exc:
+            QMessageBox.critical(self, "Diario", f"No se pudo cargar el diario:\n{exc}")
+            diary_text = ""
+
+        dialog = DiaryDialog(diary_text, parent=self)
+        if dialog.exec() == QDialog.Accepted:
+            new_text = dialog.get_text()
+            try:
+                self.current_project.save_diary(new_text)
+                QMessageBox.information(self, "Diario", "Diario guardado correctamente.")
+            except Exception as exc:
+                QMessageBox.critical(self, "Diario", f"No se pudo guardar el diario:\n{exc}")
 
     # -------------------- FUNCIONES NUEVAS --------------------
     def show_code_fragments(self, item, column):
@@ -484,6 +619,27 @@ class RaizQAGUI(QMainWindow):
         chosen_color = color or QColor(color_code)
         self.highlight_selection(cursor, chosen_color)
 
+    def _adjust_highlight_color(self, color):
+        """Ajusta el color del subrayado según el tema activo."""
+        qcolor = QColor(color) if isinstance(color, QColor) else QColor(str(color))
+        if self.is_dark_mode:
+            base = QColor(self._current_theme()["text_bg"])
+            qcolor = self._blend_colors(qcolor, base, 0.45)
+            qcolor.setAlpha(220)
+        else:
+            qcolor = qcolor.lighter(110)
+            qcolor.setAlpha(255)
+        return qcolor
+
+    def _blend_colors(self, primary, secondary, weight):
+        """Mezcla dos QColor según un peso (0..1) para suavizar tonos."""
+        weight = max(0.0, min(1.0, weight))
+        inv = 1.0 - weight
+        r = int(primary.red() * weight + secondary.red() * inv)
+        g = int(primary.green() * weight + secondary.green() * inv)
+        b = int(primary.blue() * weight + secondary.blue() * inv)
+        return QColor(r, g, b)
+
     def _resolve_fragment_positions(self, fragment):
         """Obtiene posiciones por texto si no existen offsets persistidos."""
         snippet = fragment.get("text", "")
@@ -555,13 +711,18 @@ class RaizQAGUI(QMainWindow):
             QMessageBox.information(self, "Códigos", "Primero selecciona un documento.")
             return
         doc_path = self.current_project.get_document_path(self.current_doc)
-        viewer = CodeViewerWindow(doc_path, self.codes)
+        viewer = CodeViewerWindow(
+            doc_path,
+            self.codes,
+            theme=self._current_theme(),
+            dark_mode=self.is_dark_mode,
+        )
         viewer.exec()
 
     # -------------------- DESTACADO --------------------
     def highlight_selection(self, cursor, color):
         fmt = QTextCharFormat()
-        fmt.setBackground(color)
+        fmt.setBackground(self._adjust_highlight_color(color))
         cursor.mergeCharFormat(fmt)
 
     def restore_highlights(self):
@@ -629,13 +790,29 @@ class RaizQAGUI(QMainWindow):
 
     def apply_code_item_color(self, item, color_hex):
         color = QColor(color_hex)
-        background = color.lighter(170)
+        background = self._code_item_background(color)
+        foreground = QColor(self._current_theme()["tree_fg"])
         for col in range(item.columnCount()):
             item.setBackground(col, background)
+            item.setForeground(col, foreground)
         icon = self._circle_icon(color)
         item.setIcon(0, icon)
         text = item.text(0).lstrip()
         item.setText(0, f"   {text}")
+
+    def _code_item_background(self, color):
+        """Devuelve el color de fondo del árbol (sin resaltar el ítem)."""
+        return QColor(self._current_theme()["tree_bg"])
+
+    def _refresh_code_tree_colors(self):
+        iterator = QTreeWidgetItemIterator(self.code_tree)
+        while iterator.value():
+            item = iterator.value()
+            code_name = item.text(0).strip()
+            code = self.get_code_data(code_name)
+            if code:
+                self.apply_code_item_color(item, code.get("color", "#fff59d"))
+            iterator += 1
 
     def _circle_icon(self, color):
         pixmap = QPixmap(12, 12)
