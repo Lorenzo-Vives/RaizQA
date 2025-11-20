@@ -7,7 +7,7 @@ El software fue creado por Lorenzo Vives, Sociólogo y Magíster en Sociología 
 
 Descarga la última versión desde el siguiente enlace:
 
-➡️ RaizQA v1.2 — Descargar .exe https://github.com/Lorenzo-Vives/RaizQA/releases/download/v.1.2/RaizQA.exe 
+➡️ RaizQA v1.2 — Descargar .exe https://github.com/Lorenzo-Vives/RaizQA/releases/download/v.1.3/RaizQA.exe
 
 ## ⚠️ Nota: Windows podría mostrar una advertencia al ejecutar el archivo. Para continuar: Más información → Ejecutar de todas formas.
 
