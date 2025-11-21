@@ -33,13 +33,15 @@ class Project:
             with open(self.metadata_path, "w", encoding="utf-8") as f:
                 json.dump(meta, f, indent=4, ensure_ascii=False)
 
-    def save_state(self, codes, documents, highlights):
+    def save_state(self, codes, documents, highlights, doc_groups=None):
         """Persiste el estado principal del proyecto."""
         data = {
             "codes": codes,
             "documents": documents,
             "highlights": highlights,
         }
+        if doc_groups is not None:
+            data["doc_groups"] = doc_groups
         os.makedirs(self.path, exist_ok=True)
         with open(self.state_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
