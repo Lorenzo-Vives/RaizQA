@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QSplitter, QTextEdit, QListWidget,
     QListWidgetItem, QLabel, QWidget, QHBoxLayout
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QColor
 
 from gui.theme import get_theme
@@ -192,7 +192,9 @@ class CodeViewerWindow(QDialog):
 
                 # Crear ítem en lista
                 item = QListWidgetItem()
-                item.setSizeHint(item_widget.sizeHint())
+                hint = item_widget.sizeHint()
+                hint.setHeight(max(hint.height(), 60))
+                item.setSizeHint(hint)
                 item.setData(Qt.UserRole, (code, frag))
                 self.code_list.addItem(item)
                 self.code_list.setItemWidget(item, item_widget)
