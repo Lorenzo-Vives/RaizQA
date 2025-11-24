@@ -6,6 +6,20 @@ RaizQA es un proyecto open source de análisis cualitativo en Python con PySide6
 - Descarga la última versión: RaizQA v1.4 — https://github.com/Lorenzo-Vives/RaizQA/releases/download/v.1.4/RaizQA.exe
 ## ⚠️ Nota: Windows puede mostrar una advertencia. Usa “Más información” → “Ejecutar de todas formas”.
 
+## Crear un .app en macOS
+1) Instala dependencias en un entorno virtual:
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt pyinstaller
+```
+2) Empaqueta con PyInstaller usando el spec macOS:
+```bash
+pyinstaller --clean RaizQA_macos.spec
+```
+3) El bundle queda en `dist/RaizQA.app` (abre con doble clic).  
+Opcional: coloca un icono `.icns` y actualiza `icon=` en `RaizQA_macos.spec`.
+
 ## Flujo básico de uso
 1) Selecciona un Working Directory donde se guardan los proyectos.  
 2) Crea un proyecto nuevo o abre uno existente.  

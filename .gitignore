@@ -1,0 +1,17 @@
+# Entorno y dependencias
+.venv/
+__pycache__/
+*.pyc
+
+# Builds y binarios
+build/
+dist/
+*.exe
+*.app
+
+# Archivos temporales
+.DS_Store
+*.log
+
+# Especificaciones PyInstaller opcionales
+!RaizQA_macos.spec
