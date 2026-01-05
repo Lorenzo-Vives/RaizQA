@@ -23,7 +23,7 @@ Opcional: coloca un icono `.icns` y actualiza `icon=` en `RaizQA_macos.spec`.
 ## Flujo básico de uso
 1) Selecciona un Working Directory donde se guardan los proyectos.  
 2) Crea un proyecto nuevo o abre uno existente.  
-3) Importa documentos .txt, .pdf o .docx (se convierten a texto plano).  
+3) Importa documentos .txt, .pdf o .docx (se convierten a texto plano) o imagenes (.png, .jpg, .jpeg, .bmp, .gif, .tiff) para verlas y codificarlas.  
 4) Selecciona texto para crear códigos y subcódigos (árbol jerárquico).  
 5) Clic derecho en un código para crear/editar memos (con corrector ortográfico).  
 6) Lleva tu diario de codificación (botón Diario) y expórtalo a Word con “Exportar diario”.  

@@ -1,18 +1,21 @@
-from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import collect_all, collect_data_files
 
 block_cipher = None
+
+pyside6_datas, pyside6_binaries, pyside6_hiddenimports = collect_all('PySide6')
+spellchecker_datas, spellchecker_binaries, spellchecker_hiddenimports = collect_all('spellchecker')
 
 a = Analysis(
     ['main.py'],
     pathex=['.'],
-    binaries=[],
-    datas=collect_data_files('pyspellchecker', includes=['resources/*']) + [
+    binaries=pyside6_binaries + spellchecker_binaries,
+    datas=collect_data_files('pyspellchecker', includes=['resources/*']) + pyside6_datas + spellchecker_datas + [
         ('gui', 'gui'),
         ('core', 'core'),
         ('code_viewer', 'code_viewer'),
         ('resources', 'resources'),
     ],
-    hiddenimports=[],
+    hiddenimports=pyside6_hiddenimports + spellchecker_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

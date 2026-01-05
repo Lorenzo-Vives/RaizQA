@@ -1,5 +1,6 @@
 import os
 import json
+import shutil
 from docx import Document as DocxDocument
 from PyPDF2 import PdfReader
 
@@ -8,6 +9,9 @@ from core.memos import MemoManager
 
 class Project:
     """Administra la estructura y persistencia de un proyecto de análisis cualitativo."""
+
+    TEXT_EXTENSIONS = {".txt", ".docx", ".pdf"}
+    IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tiff"}
 
     def __init__(self, name, base_path):
         self.name = name
@@ -76,22 +80,26 @@ class Project:
     # DOCUMENTOS
     # ------------------------------------------------------------------
     def import_document(self, file_path):
-        """Importa un archivo TXT, DOCX o PDF y devuelve (nombre, texto)."""
+        """Importa un archivo de texto o imagen y devuelve (nombre, texto)."""
         ext = os.path.splitext(file_path)[1].lower()
         filename = os.path.splitext(os.path.basename(file_path))[0]
-        dest_name = f"{filename}.txt"
+        dest_name = f"{filename}{ext if ext in self.IMAGE_EXTENSIONS else '.txt'}"
         dest_path = os.path.join(self.documents_path, dest_name)
 
-        if ext == ".docx":
+        if ext in self.IMAGE_EXTENSIONS:
+            shutil.copy2(file_path, dest_path)
+            text = ""
+        elif ext == ".docx":
             text = self._read_docx(file_path)
         elif ext == ".pdf":
             text = self._read_pdf(file_path)
         elif ext == ".txt":
             text = self._read_txt(file_path)
         else:
-            raise ValueError("Solo se admiten archivos .txt, .docx o .pdf")
+            raise ValueError("Solo se admiten archivos .txt, .docx, .pdf o imágenes (png, jpg, jpeg, bmp, gif, tiff)")
 
-        self._write_text(dest_path, text)
+        if ext in self.TEXT_EXTENSIONS:
+            self._write_text(dest_path, text)
         self._register_document(dest_name)
         return dest_name, text
 
@@ -108,19 +116,42 @@ class Project:
             with open(self.metadata_path, "w", encoding="utf-8") as f:
                 json.dump(meta, f, indent=4, ensure_ascii=False)
 
+    def delete_document(self, document_name):
+        """Elimina el archivo y lo quita del metadata."""
+        doc_path = self.get_document_path(document_name)
+        if os.path.exists(doc_path):
+            try:
+                os.remove(doc_path)
+            except OSError:
+                pass
+        if os.path.exists(self.metadata_path):
+            try:
+                with open(self.metadata_path, "r", encoding="utf-8") as f:
+                    meta = json.load(f)
+                if document_name in meta.get("documents", []):
+                    meta["documents"].remove(document_name)
+                    with open(self.metadata_path, "w", encoding="utf-8") as f:
+                        json.dump(meta, f, indent=4, ensure_ascii=False)
+            except Exception:
+                pass
+
     def list_documents(self):
         """Devuelve los documentos almacenados en la carpeta del proyecto."""
         if not os.path.exists(self.documents_path):
             return []
-        return sorted(f for f in os.listdir(self.documents_path) if f.lower().endswith(".txt"))
+        allowed = tuple(self.TEXT_EXTENSIONS | self.IMAGE_EXTENSIONS)
+        return sorted(f for f in os.listdir(self.documents_path) if f.lower().endswith(allowed))
 
     def get_document_path(self, document_name):
         return os.path.join(self.documents_path, document_name)
 
     def read_document(self, document_name):
-        """Lee el texto plano almacenado para un documento."""
+        """Lee el texto plano almacenado para un documento. Las imágenes devuelven cadena vacía."""
         doc_path = self.get_document_path(document_name)
         if not os.path.exists(doc_path):
+            return ""
+        ext = os.path.splitext(document_name)[1].lower()
+        if ext in self.IMAGE_EXTENSIONS:
             return ""
         with open(doc_path, "r", encoding="utf-8") as f:
             return f.read()

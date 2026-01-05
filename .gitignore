@@ -6,6 +6,7 @@ __pycache__/
 # Builds y binarios
 build/
 dist/
+dist_build/
 *.exe
 *.app
 

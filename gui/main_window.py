@@ -2,17 +2,20 @@ import os
 import shutil
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QListWidget, QFileDialog, QMessageBox, QInputDialog, QFrame, QLineEdit,
+    QListWidget, QFileDialog, QMessageBox, QInputDialog, QFrame, QLineEdit, QSizeGrip,
     QTreeWidget, QTreeWidgetItem, QMenu, QDialog, QHeaderView, QTreeWidgetItemIterator,
     QGridLayout, QDialogButtonBox, QFileIconProvider, QAbstractItemView, QTextEdit
 )
 from PySide6.QtGui import QAction, QColor, QTextCursor, QTextCharFormat, QPainter, QPixmap, QIcon, QPalette
-from PySide6.QtCore import Qt, QTimer, QPoint, QEvent
+from PySide6.QtCore import Qt, QTimer, QPoint, QEvent, QUrl
 from docx import Document
 
 from gui.dialogs.memo_dialog import MemoDialog
 from gui.dialogs.fragments_dialog import CodeFragmentsDialog
 from gui.dialogs.diary_dialog import DiaryDialog
+from gui.dialogs.compare_dialog import CompareDialog
+from gui.dialogs.code_matrix_dialog import CodeMatrixDialog
+from gui.dialogs.wordcloud_dialog import WordCloudDialog
 from gui.document_tree import DocumentTree
 from gui.code_tree import CodeTree
 from code_viewer.code_viewer import CodeViewerWindow  # Absolute import desde root
@@ -36,6 +39,7 @@ class RaizQAGUI(QMainWindow):
 
     def __init__(self):
         super().__init__()
+        self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
         self.setWindowTitle("RaizQA 🌱")
         self.setGeometry(100, 100, 1000, 600)
 
@@ -58,20 +62,24 @@ class RaizQAGUI(QMainWindow):
         self._search_matches = []
         self._search_index = -1
         self._search_term = ""
+        self._zoom_level = 0
+        self._codes_expanded = True
 
         # -------------------- LAYOUT PRINCIPAL --------------------
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout()
-        main_layout.setContentsMargins(12, 12, 12, 12)
-        main_layout.setSpacing(10)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
         central_widget.setLayout(main_layout)
 
         # -------------------- TOP BAR (inspiración VSCode) --------------------
         topbar_frame = QFrame()
         topbar_frame.setObjectName("TopBarFrame")
+        topbar_frame.setFixedHeight(34)
+        self.topbar_frame = topbar_frame
         topbar_layout = QHBoxLayout(topbar_frame)
-        topbar_layout.setContentsMargins(4, 1, 4, 1)
+        topbar_layout.setContentsMargins(8, 2, 8, 2)
         topbar_layout.setSpacing(3)
 
         # Labels de proyecto y WD para reutilizarlos en la barra
@@ -130,8 +138,32 @@ class RaizQAGUI(QMainWindow):
         meta_layout.addWidget(self.lbl_project)
         meta_layout.addWidget(self.lbl_working_dir)
         topbar_layout.addLayout(meta_layout)
+        topbar_layout.addSpacing(6)
+
+        self.btn_minimize = QPushButton("_")
+        self.btn_minimize.setObjectName("WindowButton")
+        self.btn_minimize.setFixedSize(24, 20)
+        self.btn_minimize.clicked.connect(self.showMinimized)
+        topbar_layout.addWidget(self.btn_minimize)
+
+        self.btn_maximize = QPushButton("[]")
+        self.btn_maximize.setObjectName("WindowButton")
+        self.btn_maximize.setFixedSize(24, 20)
+        self.btn_maximize.clicked.connect(self.toggle_maximize)
+        topbar_layout.addWidget(self.btn_maximize)
+
+        self.btn_close = QPushButton("X")
+        self.btn_close.setObjectName("WindowButtonClose")
+        self.btn_close.setFixedSize(24, 20)
+        self.btn_close.clicked.connect(self.close)
+        topbar_layout.addWidget(self.btn_close)
 
         main_layout.addWidget(topbar_frame)
+
+        content_wrapper = QWidget()
+        content_wrapper_layout = QVBoxLayout(content_wrapper)
+        content_wrapper_layout.setContentsMargins(12, 12, 12, 12)
+        content_wrapper_layout.setSpacing(10)
 
         # -------------------- ACCIONES --------------------
         actions_frame = QFrame()
@@ -161,6 +193,15 @@ class RaizQAGUI(QMainWindow):
         self.btn_export_codes = QPushButton("Exportar códigos")
         self.btn_export_codes.clicked.connect(self.export_code_tree)
 
+        self.btn_compare = QPushButton("Comparar documentos")
+        self.btn_compare.clicked.connect(self.open_compare_dialog)
+
+        self.btn_code_matrix = QPushButton("Code Matrix Browser")
+        self.btn_code_matrix.clicked.connect(self.open_code_matrix)
+
+        self.btn_wordcloud = QPushButton("Nube de palabras")
+        self.btn_wordcloud.clicked.connect(self.open_wordcloud_dialog)
+
         self.btn_export_diary = QPushButton("Exportar diario")
         self.btn_export_diary.clicked.connect(self.export_diary)
 
@@ -170,7 +211,23 @@ class RaizQAGUI(QMainWindow):
         self.btn_diary = QPushButton("📓 Diario de codificación")
         self.btn_diary.clicked.connect(self.open_diary)
 
-        def add_action_row(buttons):
+        self.btn_nav_home = QPushButton("Inicio")
+        self.btn_nav_codes = QPushButton("Códigos")
+        self.btn_nav_analysis = QPushButton("Análisis")
+
+        nav_row = QHBoxLayout()
+        nav_row.setSpacing(8)
+        for btn in (self.btn_nav_home, self.btn_nav_codes, self.btn_nav_analysis, self.btn_toggle_theme):
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setMinimumHeight(30)
+            btn.setProperty("navButton", True)
+            if btn is not self.btn_toggle_theme:
+                btn.setCheckable(True)
+            nav_row.addWidget(btn)
+        nav_row.addStretch()
+        actions_layout.addLayout(nav_row)
+
+        def add_action_row(target_layout, buttons):
             row = QHBoxLayout()
             row.setSpacing(8)
             for btn in buttons:
@@ -179,20 +236,36 @@ class RaizQAGUI(QMainWindow):
                 btn.setProperty("actionButton", True)
                 row.addWidget(btn)
             row.addStretch()
-            actions_layout.addLayout(row)
+            target_layout.addLayout(row)
 
-        add_action_row(
-            [
-                self.btn_working_dir,
-                self.btn_create,
-                self.btn_open,
-                self.btn_import_doc,
-                self.btn_save,
-                self.btn_toggle_theme,
-            ]
-        )
-        add_action_row([self.btn_diary, self.btn_view_codes, self.btn_export_codes, self.btn_export_diary])
-        main_layout.addWidget(actions_frame)
+        self.actions_home = QWidget()
+        home_layout = QVBoxLayout(self.actions_home)
+        home_layout.setContentsMargins(0, 0, 0, 0)
+        home_layout.setSpacing(6)
+        add_action_row(home_layout, [self.btn_working_dir, self.btn_create, self.btn_open, self.btn_import_doc])
+
+        self.actions_codes = QWidget()
+        codes_layout = QVBoxLayout(self.actions_codes)
+        codes_layout.setContentsMargins(0, 0, 0, 0)
+        codes_layout.setSpacing(6)
+        add_action_row(codes_layout, [self.btn_view_codes, self.btn_export_codes, self.btn_diary, self.btn_export_diary])
+
+        self.actions_analysis = QWidget()
+        analysis_layout = QVBoxLayout(self.actions_analysis)
+        analysis_layout.setContentsMargins(0, 0, 0, 0)
+        analysis_layout.setSpacing(6)
+        add_action_row(analysis_layout, [self.btn_compare, self.btn_code_matrix, self.btn_wordcloud])
+
+        actions_layout.addWidget(self.actions_home)
+        actions_layout.addWidget(self.actions_codes)
+        actions_layout.addWidget(self.actions_analysis)
+
+        self.btn_nav_home.clicked.connect(lambda: self._set_actions_view("home"))
+        self.btn_nav_codes.clicked.connect(lambda: self._set_actions_view("codes"))
+        self.btn_nav_analysis.clicked.connect(lambda: self._set_actions_view("analysis"))
+        self._set_actions_view("home")
+
+        content_wrapper_layout.addWidget(actions_frame)
 
         # -------------------- CONTENIDO PRINCIPAL --------------------
         content_frame = QFrame()
@@ -244,9 +317,23 @@ class RaizQAGUI(QMainWindow):
         code_layout.setContentsMargins(12, 12, 12, 12)
         code_layout.setSpacing(8)
 
+        code_header_row = QHBoxLayout()
+        code_header_row.setContentsMargins(0, 0, 0, 0)
+        code_header_row.setSpacing(6)
         code_header = QLabel("Árbol de Códigos")
         code_header.setObjectName("Subheading")
-        code_layout.addWidget(code_header)
+        code_header_row.addWidget(code_header)
+        code_header_row.addStretch()
+        self.code_search_field = QLineEdit()
+        self.code_search_field.setPlaceholderText("Buscar código")
+        self.code_search_field.textChanged.connect(self.filter_codes)
+        self.code_search_field.setFixedWidth(180)
+        self.btn_toggle_code_expand = QPushButton("Contraer")
+        self.btn_toggle_code_expand.setFixedWidth(90)
+        self.btn_toggle_code_expand.clicked.connect(self.toggle_code_tree_expansion)
+        code_header_row.addWidget(self.btn_toggle_code_expand)
+        code_header_row.addWidget(self.code_search_field)
+        code_layout.addLayout(code_header_row)
 
         self.code_tree = CodeTree(drop_callback=self._on_code_tree_drop)
         self.code_tree.setHeaderLabels(["Código", "n", "Memo"])
@@ -293,7 +380,16 @@ class RaizQAGUI(QMainWindow):
         text_layout.addWidget(self.text_area, 1)
         content_layout.addWidget(text_card, 62)
 
-        main_layout.addWidget(content_frame, 1)
+        content_wrapper_layout.addWidget(content_frame, 1)
+
+        resize_row = QHBoxLayout()
+        resize_row.setContentsMargins(0, 0, 0, 0)
+        resize_row.addStretch()
+        self.size_grip = QSizeGrip(self)
+        resize_row.addWidget(self.size_grip)
+        content_wrapper_layout.addLayout(resize_row)
+
+        main_layout.addWidget(content_wrapper, 1)
 
         self.auto_save_timer = QTimer(self)
         self.auto_save_timer.timeout.connect(self.auto_save)
@@ -301,6 +397,7 @@ class RaizQAGUI(QMainWindow):
 
         self.apply_theme()
         self._refresh_options_menu()
+        self._setup_titlebar_drag()
 
     def _setup_file_menu(self):
         menu = QMenu(self)
@@ -314,6 +411,7 @@ class RaizQAGUI(QMainWindow):
             ("Guardar Proyecto Como...", self.save_project_as),
             ("Exportar códigos", self.export_code_tree),
             ("Exportar diario (Word)", self.export_diary),
+            ("Comparar documentos", self.open_compare_dialog),
         ]
         for title, handler in actions:
             act = QAction(title, self)
@@ -334,6 +432,32 @@ class RaizQAGUI(QMainWindow):
     def _refresh_options_menu(self):
         if hasattr(self, "action_toggle_theme"):
             self.action_toggle_theme.setText("Modo claro" if self.is_dark_mode else "Modo oscuro")
+
+    def _setup_titlebar_drag(self):
+        self._drag_pos = None
+        self._titlebar_drag_widgets = [
+            self.topbar_frame,
+            self.lbl_top_brand,
+            self.lbl_project,
+            self.lbl_working_dir,
+            self.lbl_search_count,
+        ]
+        for widget in self._titlebar_drag_widgets:
+            widget.installEventFilter(self)
+
+    def _set_actions_view(self, view_name):
+        self.actions_home.setVisible(view_name == "home")
+        self.actions_codes.setVisible(view_name == "codes")
+        self.actions_analysis.setVisible(view_name == "analysis")
+        self.btn_nav_home.setChecked(view_name == "home")
+        self.btn_nav_codes.setChecked(view_name == "codes")
+        self.btn_nav_analysis.setChecked(view_name == "analysis")
+
+    def toggle_maximize(self):
+        if self.isMaximized():
+            self.showNormal()
+        else:
+            self.showMaximized()
 
     # -------------------- BÚSQUEDA GLOBAL --------------------
     def _update_search_label(self):
@@ -379,6 +503,8 @@ class RaizQAGUI(QMainWindow):
 
         # Buscar en documentos
         for doc_name in self._all_documents():
+            if self._is_image_document(doc_name):
+                continue
             try:
                 text = self.current_project.read_document(doc_name)
             except Exception:
@@ -500,8 +626,7 @@ class RaizQAGUI(QMainWindow):
             }}
             QFrame#TopBarFrame {{
                 background-color: {theme['panel_bg']};
-                border: 1px solid {theme['border']};
-                border-radius: 5px;
+                border-bottom: 1px solid {theme['border']};
             }}
             QLabel#SearchCount {{
                 color: {theme['muted_text']};
@@ -522,6 +647,17 @@ class RaizQAGUI(QMainWindow):
                 color: {highlight_text};
                 border-radius: 6px;
             }}
+            QPushButton[navButton="true"] {{
+                background-color: {theme['panel_bg']};
+                border: 1px solid {theme['border']};
+                padding: 6px 12px;
+                font-weight: 600;
+            }}
+            QPushButton[navButton="true"]:checked {{
+                background-color: {theme['selection']};
+                color: {highlight_text};
+                border-color: {theme['selection']};
+            }}
             QPushButton#SearchNavButton {{
                 background: transparent;
                 border: 1px solid {theme['border']};
@@ -534,6 +670,30 @@ class RaizQAGUI(QMainWindow):
             QPushButton#SearchNavButton:hover {{
                 background-color: {theme['selection']};
                 color: {highlight_text};
+            }}
+            QPushButton#WindowButton {{
+                background: transparent;
+                border: 1px solid {theme['border']};
+                color: {theme['text_fg']};
+                padding: 1px 6px;
+                border-radius: 4px;
+                font-size: 10px;
+            }}
+            QPushButton#WindowButton:hover {{
+                background-color: {theme['selection']};
+                color: {highlight_text};
+            }}
+            QPushButton#WindowButtonClose {{
+                background: transparent;
+                border: 1px solid {theme['border']};
+                color: {theme['text_fg']};
+                padding: 1px 6px;
+                border-radius: 4px;
+                font-size: 10px;
+            }}
+            QPushButton#WindowButtonClose:hover {{
+                background-color: #e81123;
+                color: #ffffff;
             }}
             QLineEdit#SearchField {{
                 background-color: {theme['text_bg']};
@@ -735,6 +895,47 @@ class RaizQAGUI(QMainWindow):
         self.memo_manager.delete_memo(code_name)
         self.update_memo_icon(code_name, has_memo=False)
 
+    def delete_document(self, doc_item):
+        if not doc_item or doc_item.data(0, Qt.UserRole) != "doc":
+            return
+        doc_name = doc_item.text(0)
+        confirm = QMessageBox.question(
+            self,
+            "Eliminar documento",
+            f"¿Eliminar el documento '{doc_name}' del proyecto?\nSe quitarán sus fragmentos y subrayados.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if confirm != QMessageBox.Yes:
+            return
+
+        if self.current_project:
+            try:
+                self.current_project.delete_document(doc_name)
+            except Exception as exc:
+                QMessageBox.critical(self, "Eliminar documento", f"No se pudo eliminar el archivo:\n{exc}")
+                return
+
+        self._remove_doc_from_groups(doc_name)
+        parent = doc_item.parent()
+        if parent:
+            parent.removeChild(doc_item)
+        else:
+            idx = self.doc_tree.indexOfTopLevelItem(doc_item)
+            if idx >= 0:
+                self.doc_tree.takeTopLevelItem(idx)
+
+        if self.current_doc == doc_name:
+            self.current_doc = None
+            self.text_area.clear()
+
+        self.highlights.pop(doc_name, None)
+        self._remove_fragments_for_document(doc_name)
+
+        self._rebuild_doc_groups_from_tree()
+        self.save_project()
+        QMessageBox.information(self, "Eliminar documento", f"Documento '{doc_name}' eliminado del proyecto.")
+
     # -------------------- DIARIO --------------------
     def open_diary(self):
         if not self.current_project:
@@ -813,6 +1014,8 @@ class RaizQAGUI(QMainWindow):
         self.code_tree.clear()
         self.text_area.clear()
         self._clear_column_selection()
+        if hasattr(self, "code_search_field"):
+            self.code_search_field.clear()
 
     def save_project(self):
         if not self.current_project:
@@ -940,11 +1143,33 @@ class RaizQAGUI(QMainWindow):
                     self.update_memo_icon(code_name, True)
 
         self._color_index = max(self._color_index, len(self.codes))
+        if hasattr(self, "code_search_field"):
+            self.filter_codes(self.code_search_field.text())
 
     def ensure_code_colors(self):
         for code in self.codes:
             if not code.get("color"):
                 code["color"] = self.next_palette_color()
+
+    def filter_codes(self, text):
+        """Filtra el árbol de códigos por nombre."""
+        term = (text or "").strip().lower()
+        if not hasattr(self, "code_tree"):
+            return
+
+        def recurse(item):
+            child_visible = False
+            for i in range(item.childCount()):
+                child_visible = recurse(item.child(i)) or child_visible
+            item_match = not term or term in self._code_item_name(item).lower()
+            visible = item_match or child_visible
+            item.setHidden(not visible)
+            if visible and term:
+                item.setExpanded(True)
+            return visible
+
+        for idx in range(self.code_tree.topLevelItemCount()):
+            recurse(self.code_tree.topLevelItem(idx))
 
     def _populate_doc_tree(self):
         self.doc_tree.clear()
@@ -965,6 +1190,14 @@ class RaizQAGUI(QMainWindow):
         for doc_list in self.doc_groups.values():
             docs.extend(doc_list)
         return docs
+
+    def _is_image_document(self, doc_name):
+        if not doc_name:
+            return False
+        return doc_name.lower().endswith(tuple(Project.IMAGE_EXTENSIONS))
+
+    def _is_current_doc_image(self):
+        return self._is_image_document(self.current_doc)
 
     def _rebuild_doc_groups_from_tree(self):
         groups = {"__root__": []}
@@ -1046,6 +1279,7 @@ class RaizQAGUI(QMainWindow):
     def _rebuild_codes_from_tree(self):
         for idx in range(self.code_tree.topLevelItemCount()):
             self._update_code_parent_recursive(self.code_tree.topLevelItem(idx), None)
+        self.filter_codes(self.code_search_field.text() if hasattr(self, "code_search_field") else "")
 
     def _update_code_parent_recursive(self, item, parent_name):
         if not item:
@@ -1069,6 +1303,26 @@ class RaizQAGUI(QMainWindow):
 
     # -------------------- SELECCIÓN COLUMNAR EN TEXTO --------------------
     def eventFilter(self, obj, event):
+        if hasattr(self, "_titlebar_drag_widgets") and obj in self._titlebar_drag_widgets:
+            if event.type() == QEvent.MouseButtonDblClick and event.button() == Qt.LeftButton:
+                self.toggle_maximize()
+                return True
+            if event.type() == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
+                if self.isMaximized():
+                    return True
+                if hasattr(event, "globalPosition"):
+                    self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+                    return True
+            elif event.type() == QEvent.MouseMove:
+                if self._drag_pos is not None and event.buttons() & Qt.LeftButton:
+                    if self.isMaximized():
+                        return True
+                    if hasattr(event, "globalPosition"):
+                        self.move(event.globalPosition().toPoint() - self._drag_pos)
+                        return True
+            elif event.type() == QEvent.MouseButtonRelease:
+                self._drag_pos = None
+                return True
         if obj is self.text_area:
             if event.type() == QEvent.MouseButtonPress:
                 if event.button() == Qt.MiddleButton or (event.button() == Qt.LeftButton and event.modifiers() & Qt.AltModifier):
@@ -1094,6 +1348,19 @@ class RaizQAGUI(QMainWindow):
                         self._copy_column_selection_to_clipboard()
                         return True
         return super().eventFilter(obj, event)
+
+    def keyPressEvent(self, event):
+        if event.modifiers() & Qt.ControlModifier:
+            if event.key() in (Qt.Key_Plus, Qt.Key_Equal):
+                self.zoom_in()
+                return
+            if event.key() == Qt.Key_Minus:
+                self.zoom_out()
+                return
+            if event.key() == Qt.Key_0:
+                self.zoom_reset()
+                return
+        super().keyPressEvent(event)
 
     def _start_column_selection(self, pos):
         cursor = self.text_area.cursorForPosition(pos)
@@ -1193,6 +1460,26 @@ class RaizQAGUI(QMainWindow):
             lines.append(snippet)
         QApplication.clipboard().setText("\n".join(lines))
 
+    # -------------------- ZOOM --------------------
+    def zoom_in(self):
+        if hasattr(self, "text_area"):
+            self.text_area.zoomIn(1)
+            self._zoom_level += 1
+
+    def zoom_out(self):
+        if hasattr(self, "text_area"):
+            self.text_area.zoomOut(1)
+            self._zoom_level -= 1
+
+    def zoom_reset(self):
+        if not hasattr(self, "text_area"):
+            return
+        if self._zoom_level > 0:
+            self.text_area.zoomOut(self._zoom_level)
+        elif self._zoom_level < 0:
+            self.text_area.zoomIn(-self._zoom_level)
+        self._zoom_level = 0
+
     def _on_code_tree_drop(self):
         self._rebuild_codes_from_tree()
         self.save_project()
@@ -1203,12 +1490,17 @@ class RaizQAGUI(QMainWindow):
         if not self.current_project:
             QMessageBox.warning(self, "Importar archivo", "Primero crea o abre un proyecto.")
             return
-        file_path, _ = QFileDialog.getOpenFileName(self, "Seleccionar archivo", "", "Documentos (*.txt *.pdf *.docx)")
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Seleccionar archivo",
+            "",
+            "Documentos o imagenes (*.txt *.pdf *.docx *.png *.jpg *.jpeg *.bmp *.gif *.tiff)",
+        )
         if not file_path:
             return
 
         try:
-            file_name, text = self.current_project.import_document(file_path)
+            file_name, _ = self.current_project.import_document(file_path)
         except ValueError as err:
             QMessageBox.warning(self, "Importar archivo", str(err))
             return
@@ -1218,18 +1510,26 @@ class RaizQAGUI(QMainWindow):
 
         existing = self._all_documents()
         folder = self._current_folder_name()
+        new_item = None
         if file_name not in existing:
             self.doc_groups.setdefault(folder, []).append(file_name)
             new_item = self._add_doc_item(file_name, self._find_folder_item(folder))
-            self.doc_tree.setCurrentItem(new_item)
+        else:
+            found = self.doc_tree.findItems(file_name, Qt.MatchExactly | Qt.MatchRecursive, 0)
+            if found:
+                new_item = found[0]
 
-        self.text_area.setPlainText(text)
         self.current_doc = file_name
+        if new_item:
+            self.doc_tree.setCurrentItem(new_item)
+            self.display_document(new_item)
+        else:
+            self.display_document(self.doc_tree.currentItem())
         self._rebuild_doc_groups_from_tree()
         self.save_project()
-        QMessageBox.information(self, "Importar", f"✅ Documento '{file_name}' importado correctamente.")
+        QMessageBox.information(self, "Importar", f"Archivo '{file_name}' importado correctamente.")
 
-    # -------------------- DOCUMENTO --------------------
+# -------------------- DOCUMENTO --------------------
     def display_document(self, current, previous=None):
         if not current or current.data(0, Qt.UserRole) != "doc":
             return
@@ -1242,8 +1542,12 @@ class RaizQAGUI(QMainWindow):
         self._clear_column_selection()
         self.current_doc = current.text(0)
         if self.current_project:
-            text = self.current_project.read_document(self.current_doc)
-            self.text_area.setPlainText(text)
+            doc_path = self.current_project.get_document_path(self.current_doc)
+            if self._is_image_document(self.current_doc):
+                self._show_image_document(doc_path)
+            else:
+                text = self.current_project.read_document(self.current_doc)
+                self.text_area.setPlainText(text)
         else:
             self.text_area.clear()
 
@@ -1254,6 +1558,21 @@ class RaizQAGUI(QMainWindow):
                 frag["color"] = self._get_code_color(frag)
         self.restore_highlights()
 
+    def _show_image_document(self, doc_path):
+        if not os.path.exists(doc_path):
+            self.text_area.setPlainText("No se encontró la imagen en el proyecto.")
+            return
+        url = QUrl.fromLocalFile(doc_path).toString()
+        name = os.path.basename(doc_path)
+        html = (
+            f"<div style='text-align:center; padding:8px;'>"
+            f"<p style='color:#666; font-size:12px;'>Imagen: {name}</p>"
+            f"<img src='{url}' style='max-width:100%; height:auto; border-radius:6px;'/>"
+            f"<p style='color:#888; font-size:11px;'>Clic derecho para codificar la imagen completa.</p>"
+            f"</div>"
+        )
+        self.text_area.setHtml(html)
+
     # -------------------- CARPETAS / DOCUMENTOS --------------------
     def doc_tree_context_menu(self, pos):
         menu = QMenu(self)
@@ -1261,14 +1580,18 @@ class RaizQAGUI(QMainWindow):
 
         selected_item = self.doc_tree.itemAt(pos)
         move_action = None
+        delete_action = None
         if selected_item and selected_item.data(0, Qt.UserRole) == "doc":
             move_action = menu.addAction("Mover a carpeta…")
+            delete_action = menu.addAction("Eliminar documento")
 
         action = menu.exec(self.doc_tree.viewport().mapToGlobal(pos))
         if action == add_folder_action:
             self.create_document_folder()
         elif action == move_action:
             self.move_document_to_folder(selected_item)
+        elif action == delete_action:
+            self.delete_document(selected_item)
 
     def create_document_folder(self):
         name, ok = QInputDialog.getText(self, "Nueva carpeta", "Nombre de la carpeta:")
@@ -1326,6 +1649,15 @@ class RaizQAGUI(QMainWindow):
                 docs.remove(name)
                 break
 
+    def _remove_fragments_for_document(self, doc_name):
+        """Elimina los fragmentos asociados a un documento y actualiza conteos."""
+        for code in self.codes:
+            frags = code.get("fragments", [])
+            frags = [f for f in frags if f.get("document") != doc_name]
+            code["fragments"] = frags
+            code["count"] = len(frags)
+            self.update_code_count(code["name"], code["count"])
+
 
     # -------------------- FUNCIONES DE DOCUMENTO --------------------
     def open_document(self, file_path):
@@ -1338,8 +1670,13 @@ class RaizQAGUI(QMainWindow):
     
         self._clear_column_selection()
         self.current_doc = os.path.basename(file_path)
-        text = self.current_project.read_document(self.current_doc)
-        self.text_area.setPlainText(text)
+        if self.current_project:
+            doc_path = self.current_project.get_document_path(self.current_doc)
+            if self._is_image_document(self.current_doc):
+                self._show_image_document(doc_path)
+            else:
+                text = self.current_project.read_document(self.current_doc)
+                self.text_area.setPlainText(text)
     
         #  Cargar solo los fragmentos del documento actual
         self.highlighted = []
@@ -1355,6 +1692,9 @@ class RaizQAGUI(QMainWindow):
 
     # -------------------- CÓDIGOS --------------------
     def text_context_menu(self, pos):
+        if self._is_current_doc_image():
+            self._image_context_menu(pos)
+            return
         cursor = self.text_area.textCursor()
         selected_text = cursor.selectedText()
         selection_start = cursor.selectionStart()
@@ -1362,12 +1702,16 @@ class RaizQAGUI(QMainWindow):
         self._clear_column_selection()
         menu = QMenu()
 
+        create_code_action = None
+        create_subcode_action = None
+        create_live_code_action = None
         if selected_text and selection_start != selection_end and self.current_doc:
-            create_code_action = menu.addAction("➕ Crear nuevo código")
-            create_subcode_action = menu.addAction("↳ Crear subcódigo")
+            create_code_action = menu.addAction("⚡ Crear nuevo código")
+            create_subcode_action = menu.addAction("➔ Crear subcódigo")
+            create_live_code_action = menu.addAction("Codificar in vivo")
 
             if self.codes:
-                add_to_existing = menu.addMenu("📌 Agregar a código existente")
+                add_to_existing = menu.addMenu("📎 Agregar a código existente")
                 for c in self.codes:
                     act = add_to_existing.addAction(c["name"])
                     act.triggered.connect(
@@ -1376,23 +1720,119 @@ class RaizQAGUI(QMainWindow):
                         self.add_to_existing_code(name, text, start, end)
                     )
 
-            action = menu.exec(self.text_area.mapToGlobal(pos))
-            if action == create_code_action:
-                self.create_new_code(selected_text, selection_start, selection_end)
-            elif action == create_subcode_action:
-                self.create_subcode(selected_text, selection_start, selection_end)
-        else:
-            menu.exec(self.text_area.mapToGlobal(pos))
+        if menu.actions():
+            menu.addSeparator()
+        zoom_in_action = menu.addAction("Aumentar zoom")
+        zoom_out_action = menu.addAction("Disminuir zoom")
+        zoom_reset_action = menu.addAction("Restablecer zoom")
 
-    def create_new_code(self, selected_text, start, end, parent_item=None, code_label=None):
-        if not self.current_doc:
-            QMessageBox.warning(self, "Nuevo código", "Selecciona un documento antes de codificar.")
+        action = menu.exec(self.text_area.mapToGlobal(pos))
+        if action == create_code_action:
+            self.create_new_code(selected_text, selection_start, selection_end)
+        elif action == create_subcode_action:
+            self.create_subcode(selected_text, selection_start, selection_end)
+        elif action == create_live_code_action:
+            auto_label = self._suggest_live_code_name(selected_text)
+            self.create_new_code(selected_text, selection_start, selection_end, code_label=auto_label)
+        elif action == zoom_in_action:
+            self.zoom_in()
+        elif action == zoom_out_action:
+            self.zoom_out()
+        elif action == zoom_reset_action:
+            self.zoom_reset()
+
+    def _image_context_menu(self, pos):
+        menu = QMenu()
+        create_code_action = menu.addAction("Crear nuevo codigo para imagen")
+        create_subcode_action = menu.addAction("Crear subcodigo para imagen")
+        if self.codes:
+            add_to_existing = menu.addMenu("Agregar a codigo existente")
+            for c in self.codes:
+                act = add_to_existing.addAction(c["name"])
+                act.triggered.connect(lambda checked=False, name=c["name"]: self.add_image_to_existing(name))
+        else:
+            add_to_existing = None
+
+        if menu.actions():
+            menu.addSeparator()
+        zoom_in_action = menu.addAction("Aumentar zoom")
+        zoom_out_action = menu.addAction("Disminuir zoom")
+        zoom_reset_action = menu.addAction("Restablecer zoom")
+
+        action = menu.exec(self.text_area.mapToGlobal(pos))
+        if action == create_code_action:
+            note = self._prompt_image_note("Nuevo codigo (imagen)", "Descripcion del fragmento (opcional):")
+            if note is None:
+                return
+            self.create_new_code("", None, None, is_image=True, note=note)
+        elif action == create_subcode_action:
+            self.create_subcode_for_image()
+        elif action == zoom_in_action:
+            self.zoom_in()
+        elif action == zoom_out_action:
+            self.zoom_out()
+        elif action == zoom_reset_action:
+            self.zoom_reset()
+
+    def _prompt_image_note(self, title, label):
+        default_text = "Imagen completa"
+        note, ok = QInputDialog.getText(self, title, label, text=default_text)
+        if not ok:
+            return None
+        return note.strip() or default_text
+
+    def add_image_to_existing(self, code_name):
+        note = self._prompt_image_note("Agregar a codigo", "Descripcion del fragmento (opcional):")
+        if note is None:
             return
-        if start is None or end is None or start == end:
+        self.add_to_existing_code(code_name, note, None, None, is_image=True, note=note)
+
+    def create_subcode_for_image(self):
+        iterator = QTreeWidgetItemIterator(self.code_tree)
+        code_names = []
+        while iterator.value():
+            code_names.append(self._code_item_name(iterator.value()))
+            iterator += 1
+        if not code_names:
+            QMessageBox.warning(self, "Subcodigo", "Primero crea un codigo principal.")
+            return
+
+        parent_name, ok = QInputDialog.getItem(self, "Subcodigo", "Selecciona codigo padre:", code_names, 0, False)
+        if not ok or not parent_name:
+            return
+
+        sub_label, ok = QInputDialog.getText(self, "Nuevo Subcodigo", "Nombre del subcodigo:")
+        if not ok or not sub_label:
+            return
+
+        note = self._prompt_image_note("Nuevo fragmento (imagen)", "Descripcion del fragmento (opcional):")
+        if note is None:
+            return
+
+        parent_item = self.find_tree_item(parent_name)
+        if parent_item:
+            self.create_new_code("", None, None, parent_item, sub_label, is_image=True, note=note)
+
+    def _build_fragment(self, text, start, end, color_hex, is_image=False):
+        return {
+            "text": text,
+            "document": self.current_doc,
+            "start": start,
+            "end": end,
+            "color": color_hex,
+            "type": "image" if is_image else "text",
+        }
+
+    def create_new_code(self, selected_text, start, end, parent_item=None, code_label=None, is_image=False, note=None):
+        if not self.current_doc:
+            QMessageBox.warning(self, "Nuevo codigo", "Selecciona un documento antes de codificar.")
+            return
+        if not is_image and (start is None or end is None or start == end):
             return
 
         if not code_label:
-            code_label, ok = QInputDialog.getText(self, "Nuevo Código", "Nombre del código:")
+            prompt_title = "Nuevo Codigo (imagen)" if is_image else "Nuevo Codigo"
+            code_label, ok = QInputDialog.getText(self, prompt_title, "Nombre del codigo:")
             if not ok or not code_label:
                 return
 
@@ -1405,13 +1845,15 @@ class RaizQAGUI(QMainWindow):
         suggested_color = parent_color or self.next_palette_color()
         color_hex = self.ask_color_from_palette(suggested_color)
 
-        fragment = {
-            "text": selected_text,
-            "document": self.current_doc,
-            "start": start,
-            "end": end,
-            "color": color_hex
-        }
+        if is_image:
+            note_text = note if note is not None else self._prompt_image_note("Nuevo fragmento (imagen)", "Descripcion del fragmento (opcional):")
+            if note_text is None:
+                return
+            selected_text = note_text
+            start = None
+            end = None
+
+        fragment = self._build_fragment(selected_text, start, end, color_hex, is_image=is_image)
 
         code_item = QTreeWidgetItem([code_label, "1", ""])
         code_item.setData(0, Qt.UserRole + 1, code_label)
@@ -1432,12 +1874,14 @@ class RaizQAGUI(QMainWindow):
             "fragments": [fragment]
         })
 
-        self.highlight_fragment(fragment, QColor(color_hex))
+        if not is_image:
+            self.highlight_fragment(fragment, QColor(color_hex))
         self.save_current_highlights()
         self._rebuild_codes_from_tree()
         self.save_project()
 
-    def add_to_existing_code(self, code_name, selected_text, start, end):
+
+    def add_to_existing_code(self, code_name, selected_text, start, end, is_image=False, note=None):
         if not self.current_doc:
             return
 
@@ -1445,25 +1889,31 @@ class RaizQAGUI(QMainWindow):
         if not code_data:
             return
 
+        if is_image:
+            note_text = note if note is not None else self._prompt_image_note("Agregar a codigo", "Descripcion del fragmento (opcional):")
+            if note_text is None:
+                return
+            selected_text = note_text
+            start = None
+            end = None
+
         color_hex = code_data.get("color", "#fff59d")
-        fragment = {
-            "text": selected_text,
-            "document": self.current_doc,
-            "start": start,
-            "end": end,
-            "color": color_hex
-        }
+        fragment = self._build_fragment(selected_text, start, end, color_hex, is_image=is_image)
 
         code_data.setdefault("fragments", []).append(fragment)
         code_data["count"] = len(code_data["fragments"])
         self.update_code_count(code_name, code_data["count"])
-        self.highlight_fragment(fragment, QColor(color_hex))
+        if not is_image:
+            self.highlight_fragment(fragment, QColor(color_hex))
         self.save_current_highlights()
         self.save_project()
+
 
     def highlight_fragment(self, fragment, color=None):
         """Resalta un fragmento solo en su documento correspondiente."""
         if fragment.get("document") != self.current_doc:
+            return
+        if fragment.get("type") == "image" or self._is_current_doc_image():
             return
 
         start_pos = fragment.get("start")
@@ -1487,6 +1937,8 @@ class RaizQAGUI(QMainWindow):
         chosen_color = color or QColor(color_code)
         self.highlight_selection(cursor, chosen_color)
         self._clear_column_selection()
+
+
 
     def _adjust_highlight_color(self, color):
         """Ajusta el color del subrayado según el tema activo."""
@@ -1587,6 +2039,46 @@ class RaizQAGUI(QMainWindow):
             dark_mode=self.is_dark_mode,
         )
         viewer.exec()
+
+    def open_compare_dialog(self):
+        if not self.current_project:
+            QMessageBox.information(self, "Comparar", "Primero abre o crea un proyecto.")
+            return
+        docs = self._all_documents()
+        if len(docs) < 2:
+            QMessageBox.information(self, "Comparar", "Necesitas al menos dos documentos para comparar.")
+            return
+        left = self.current_doc or (docs[0] if docs else None)
+        right = None
+        if len(docs) >= 2:
+            right = docs[1] if docs[0] == left else docs[0]
+        dialog = CompareDialog(self.current_project, self.codes, left_doc=left, right_doc=right, parent=self)
+        dialog.exec()
+
+    def open_code_matrix(self):
+        if not self.current_project:
+            QMessageBox.information(self, "Code Matrix", "Primero abre o crea un proyecto.")
+            return
+        docs = self._all_documents()
+        if not docs:
+            QMessageBox.information(self, "Code Matrix", "No hay documentos para mostrar.")
+            return
+        if not self.codes:
+            QMessageBox.information(self, "Code Matrix", "No hay códigos creados aún.")
+            return
+        dialog = CodeMatrixDialog(docs, self.codes, parent=self)
+        dialog.exec()
+
+    def open_wordcloud_dialog(self):
+        if not self.current_project:
+            QMessageBox.information(self, "Nube de palabras", "Primero abre o crea un proyecto.")
+            return
+        docs = self._all_documents()
+        if not docs:
+            QMessageBox.information(self, "Nube de palabras", "No hay documentos para analizar.")
+            return
+        dialog = WordCloudDialog(self.current_project, docs, parent=self)
+        dialog.exec()
 
     # -------------------- EXPORTAR SISTEMA DE CÓDIGOS --------------------
     def export_code_tree(self):
@@ -1715,6 +2207,8 @@ class RaizQAGUI(QMainWindow):
         """Aplica los fragmentos de self.highlighted en el text_area."""
         if not self.current_doc:
             return
+        if self._is_current_doc_image():
+            return
 
         #  Limpiar resaltado previo
         cursor = self.text_area.textCursor()
@@ -1727,6 +2221,8 @@ class RaizQAGUI(QMainWindow):
         #  Aplicar los fragmentos guardados en self.highlighted
         for frag in self.highlighted:
             self.highlight_fragment(frag)
+
+
 
 
 
@@ -1817,6 +2313,25 @@ class RaizQAGUI(QMainWindow):
                 return code
         return None
 
+    def _suggest_live_code_name(self, text):
+        words = (text or "").split()
+        trimmed = " ".join(words[:10]).strip()
+        return trimmed if trimmed else "Código in vivo"
+
+    def toggle_code_tree_expansion(self):
+        expand = not self._codes_expanded
+        self._set_tree_items_expanded(expand)
+        self._codes_expanded = expand
+        self.btn_toggle_code_expand.setText("Contraer" if expand else "Expandir")
+
+    def _set_tree_items_expanded(self, expand=True):
+        def walk(item):
+            item.setExpanded(expand)
+            for i in range(item.childCount()):
+                walk(item.child(i))
+        for idx in range(self.code_tree.topLevelItemCount()):
+            walk(self.code_tree.topLevelItem(idx))
+
 
 class ColorPickerDialog(QDialog):
     """Muestra 10 colores fijos inspirados en MaxQDA para seleccionar un código."""
@@ -1855,4 +2370,3 @@ class ColorPickerDialog(QDialog):
     def _select_and_accept(self, color_hex):
         self.selected_color = color_hex
         self.accept()
-

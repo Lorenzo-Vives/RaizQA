@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QSplitter, QTextEdit, QListWidget,
     QListWidgetItem, QLabel, QWidget, QHBoxLayout
 )
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtCore import Qt, QSize, QUrl
 from PySide6.QtGui import QColor
 
 from gui.theme import get_theme
@@ -16,6 +16,7 @@ class CodeViewerWindow(QDialog):
     Parte superior: visor de texto con encabezado de color y nombre del código (con jerarquía si aplica).
     Parte inferior: lista de códigos con formato tipo tabla: Documento | Código | Fragmento.
     """
+    IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tiff")
 
     def __init__(self, document_path, codes, theme=None, dark_mode=False):
         super().__init__()
@@ -156,7 +157,9 @@ class CodeViewerWindow(QDialog):
                 continue
 
             for frag in fragments:
-                preview = frag["text"].strip().replace("\n", " ")
+                preview = (frag.get("text") or "").strip().replace("\n", " ")
+                if not preview and frag.get("type") == "image":
+                    preview = "(Imagen)"
                 if len(preview) > 100:
                     preview = preview[:100] + "..."
 
@@ -201,7 +204,7 @@ class CodeViewerWindow(QDialog):
 
     # ------------------------------------------------------------------
     def on_code_selected(self):
-        """Muestra el fragmento del código seleccionado con encabezado de color."""
+        """Muestra el fragmento del c?digo seleccionado con encabezado de color."""
         items = self.code_list.selectedItems()
         if not items:
             self.text_view.clear()
@@ -213,9 +216,28 @@ class CodeViewerWindow(QDialog):
         code, frag = item.data(Qt.UserRole)
         text = frag.get("text", "")
         self.text_view.clear()
-        self.text_view.setPlainText(text)
 
-        # Color según el código
+        doc_name = frag.get("document") or os.path.basename(self.document_path)
+        is_image = frag.get("type") == "image" or (doc_name and doc_name.lower().endswith(self.IMAGE_EXTENSIONS))
+        if is_image:
+            img_path = os.path.join(os.path.dirname(self.document_path), doc_name)
+            if os.path.exists(img_path):
+                url = QUrl.fromLocalFile(img_path).toString()
+                html = (
+                    f"<div style='text-align:center; padding:10px;'>"
+                    f"<p style='color:{self.theme['muted_text']}; margin-bottom:6px;'>{doc_name}</p>"
+                    f"<img src='{url}' style='max-width:100%; height:auto; border-radius:6px;' />"
+                )
+                if text:
+                    html += f"<p style='color:{self.theme['muted_text']}; padding-top:8px;'>{text}</p>"
+                html += "</div>"
+            else:
+                html = f"<p style='color:{self.theme['muted_text']};'>Imagen no encontrada: {doc_name}</p>"
+            self.text_view.setHtml(html)
+        else:
+            self.text_view.setPlainText(text)
+
+        # Color seg?n el c?digo
         color = self.code_colors.get(code["name"], QColor(100, 100, 150))
         self.header_widget.setStyleSheet(
             f"background-color: rgb({color.red()}, {color.green()}, {color.blue()}); "
@@ -223,8 +245,9 @@ class CodeViewerWindow(QDialog):
         )
         self.header_label.setStyleSheet("font-weight: bold; font-size: 13px; color: white;")
 
-        # Mostrar jerarquía si la hay
+        # Mostrar jerarqu?a si la hay
         if code.get("parent"):
-            self.header_label.setText(f"{code['parent']} → {code['name']}")
+            self.header_label.setText(f"{code['parent']} ? {code['name']}")
         else:
             self.header_label.setText(code["name"])
+
