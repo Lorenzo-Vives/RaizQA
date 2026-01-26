@@ -16,6 +16,9 @@ from gui.dialogs.diary_dialog import DiaryDialog
 from gui.dialogs.compare_dialog import CompareDialog
 from gui.dialogs.code_matrix_dialog import CodeMatrixDialog
 from gui.dialogs.wordcloud_dialog import WordCloudDialog
+from gui.dialogs.themes_categories_dialog import ThemesCategoriesDialog
+from gui.dialogs.themes_analysis_dialog import ThemesAnalysisDialog
+from gui.dialogs.case_study_dialog import CaseStudyDialog
 from gui.document_tree import DocumentTree
 from gui.code_tree import CodeTree
 from code_viewer.code_viewer import CodeViewerWindow  # Absolute import desde root
@@ -48,6 +51,8 @@ class RaizQAGUI(QMainWindow):
         self.working_dir = None
         self.current_doc = None
         self.codes = []
+        self.code_themes = []
+        self.case_studies = []
         self.highlights = {}        # todos los subrayados por documento
         self.highlighted = []       # subrayados del documento actual
         self._color_index = 0
@@ -190,6 +195,9 @@ class RaizQAGUI(QMainWindow):
         self.btn_view_codes = QPushButton("📚 Ver Códigos")
         self.btn_view_codes.clicked.connect(self.open_code_viewer)
 
+        self.btn_themes_categories = QPushButton("Temas y categorías")
+        self.btn_themes_categories.clicked.connect(self.open_themes_categories)
+
         self.btn_export_codes = QPushButton("Exportar códigos")
         self.btn_export_codes.clicked.connect(self.export_code_tree)
 
@@ -201,6 +209,12 @@ class RaizQAGUI(QMainWindow):
 
         self.btn_wordcloud = QPushButton("Nube de palabras")
         self.btn_wordcloud.clicked.connect(self.open_wordcloud_dialog)
+
+        self.btn_themes_analysis = QPushButton("Analisis de temas")
+        self.btn_themes_analysis.clicked.connect(self.open_themes_analysis)
+
+        self.btn_case_study = QPushButton("Estudio de casos")
+        self.btn_case_study.clicked.connect(self.open_case_study)
 
         self.btn_export_diary = QPushButton("Exportar diario")
         self.btn_export_diary.clicked.connect(self.export_diary)
@@ -248,13 +262,13 @@ class RaizQAGUI(QMainWindow):
         codes_layout = QVBoxLayout(self.actions_codes)
         codes_layout.setContentsMargins(0, 0, 0, 0)
         codes_layout.setSpacing(6)
-        add_action_row(codes_layout, [self.btn_view_codes, self.btn_export_codes, self.btn_diary, self.btn_export_diary])
+        add_action_row(codes_layout, [self.btn_view_codes, self.btn_themes_categories, self.btn_export_codes, self.btn_diary, self.btn_export_diary])
 
         self.actions_analysis = QWidget()
         analysis_layout = QVBoxLayout(self.actions_analysis)
         analysis_layout.setContentsMargins(0, 0, 0, 0)
         analysis_layout.setSpacing(6)
-        add_action_row(analysis_layout, [self.btn_compare, self.btn_code_matrix, self.btn_wordcloud])
+        add_action_row(analysis_layout, [self.btn_compare, self.btn_code_matrix, self.btn_wordcloud, self.btn_themes_analysis, self.btn_case_study])
 
         actions_layout.addWidget(self.actions_home)
         actions_layout.addWidget(self.actions_codes)
@@ -352,7 +366,7 @@ class RaizQAGUI(QMainWindow):
         left_layout.addWidget(code_card, 2)
 
         # Eventos
-        self.code_tree.itemClicked.connect(self.show_code_fragments)
+        self.code_tree.itemPressed.connect(self._on_code_tree_item_clicked)
         self.code_tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.code_tree.customContextMenuRequested.connect(self.code_tree_context_menu)
 
@@ -965,6 +979,13 @@ class RaizQAGUI(QMainWindow):
             dialog = CodeFragmentsDialog(code_name, code["fragments"])
             dialog.exec()
 
+    def _on_code_tree_item_clicked(self, item, column):
+        if column == 2:
+            code_name = self._code_item_name(item)
+            self.add_or_edit_memo(code_name)
+            return
+        self.show_code_fragments(item, column)
+
     # -------------------- FUNCIONES BÁSICAS --------------------
     def select_working_dir(self):
         dir_path = QFileDialog.getExistingDirectory(self, "Selecciona Working Directory")
@@ -1005,6 +1026,8 @@ class RaizQAGUI(QMainWindow):
     def reset_project_state(self):
         """Reinicia colecciones y widgets al cambiar de proyecto."""
         self.codes = []
+        self.code_themes = []
+        self.case_studies = []
         self.highlights = {}
         self.highlighted = []
         self.current_doc = None
@@ -1023,7 +1046,7 @@ class RaizQAGUI(QMainWindow):
         self._rebuild_doc_groups_from_tree()
         self._rebuild_codes_from_tree()
         documents = self._all_documents()
-        self.current_project.save_state(self.codes, documents, self.highlights, self.doc_groups)
+        self.current_project.save_state(self.codes, documents, self.highlights, self.doc_groups, self.code_themes, self.case_studies)
 
     def save_project_as(self):
         if not self.current_project:
@@ -1112,6 +1135,8 @@ class RaizQAGUI(QMainWindow):
         data = self.current_project.load_state()
 
         self.codes = data.get("codes", [])
+        self.code_themes = data.get("themes", [])
+        self.case_studies = data.get("case_studies", [])
         self.highlights = data.get("highlights", {})
         self.ensure_code_colors()
 
@@ -2040,6 +2065,16 @@ class RaizQAGUI(QMainWindow):
         )
         viewer.exec()
 
+    def open_themes_categories(self):
+        if not self.current_project:
+            QMessageBox.information(self, "Temas y categorÃ­as", "Primero abre o crea un proyecto.")
+            return
+        codes = [c.get("name") for c in self.codes if c.get("name")]
+        dialog = ThemesCategoriesDialog(codes, self.code_themes, parent=self)
+        if dialog.exec() == QDialog.Accepted:
+            self.code_themes = dialog.get_themes_data()
+            self.save_project()
+
     def open_compare_dialog(self):
         if not self.current_project:
             QMessageBox.information(self, "Comparar", "Primero abre o crea un proyecto.")
@@ -2079,6 +2114,40 @@ class RaizQAGUI(QMainWindow):
             return
         dialog = WordCloudDialog(self.current_project, docs, parent=self)
         dialog.exec()
+
+    def open_themes_analysis(self):
+        if not self.current_project:
+            QMessageBox.information(self, "Analisis de temas", "Primero abre o crea un proyecto.")
+            return
+        if not self.code_themes:
+            QMessageBox.information(self, "Analisis de temas", "No hay temas o categorias creadas.")
+            return
+        dialog = ThemesAnalysisDialog(self.codes, self.code_themes, self.current_project, parent=self)
+        dialog.exec()
+
+    def open_case_study(self):
+        if not self.current_project:
+            QMessageBox.information(self, "Estudio de casos", "Primero abre o crea un proyecto.")
+            return
+        docs = self._all_documents()
+        if not docs:
+            QMessageBox.information(self, "Estudio de casos", "No hay documentos para analizar.")
+            return
+        if not self.codes:
+            QMessageBox.information(self, "Estudio de casos", "No hay cÃ³digos creados aÃºn.")
+            return
+        dialog = CaseStudyDialog(
+            self.current_project,
+            self.codes,
+            docs,
+            self.case_studies,
+            self.doc_groups,
+            parent=self,
+        )
+        dialog.exec()
+        if dialog.updated:
+            self.case_studies = dialog.get_case_studies()
+            self.save_project()
 
     # -------------------- EXPORTAR SISTEMA DE CÓDIGOS --------------------
     def export_code_tree(self):

@@ -251,3 +251,29 @@ class CodeViewerWindow(QDialog):
         else:
             self.header_label.setText(code["name"])
 
+    def select_fragment(self, code_name, fragment):
+        """Selecciona un fragmento en la lista si existe y lo muestra."""
+        if not code_name or not fragment:
+            return
+        target_doc = fragment.get("document")
+        target_start = fragment.get("start")
+        target_end = fragment.get("end")
+        target_text = fragment.get("text")
+        for idx in range(self.code_list.count()):
+            item = self.code_list.item(idx)
+            data = item.data(Qt.UserRole)
+            if not data:
+                continue
+            code, frag = data
+            if code.get("name") != code_name:
+                continue
+            if target_doc and frag.get("document") != target_doc:
+                continue
+            if target_start is not None and target_end is not None:
+                if frag.get("start") == target_start and frag.get("end") == target_end:
+                    self.code_list.setCurrentItem(item)
+                    return
+            if target_text and frag.get("text") == target_text:
+                self.code_list.setCurrentItem(item)
+                return
+

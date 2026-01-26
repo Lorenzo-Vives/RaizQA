@@ -40,8 +40,9 @@ class ReadmeDialog(QDialog):
             <li>Importar documentos (.txt, .pdf, .docx)</li>
             <li>Crear y organizar códigos y subcódigos</li>
             <li>Guardar fragmentos de texto codificados</li>
-            <li>Escribir memos analíticos con corrector ortográfico</li>
+            <li>Escribir memos analíticos </li>
             <li>Visualizar los códigos y fragmentos asociados</li>
+            <li>Realizar análisis comparados y nubes de palabras</li>
         </ul>
 
         <h3>🪶 Guía rápida</h3>
