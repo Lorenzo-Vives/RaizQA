@@ -3,7 +3,7 @@
 RaizQA es un proyecto open source de análisis cualitativo en Python con PySide6, creado por Lorenzo Vives (Sociólogo, Magíster en Sociología PUC) con ayuda de CodexAI y ChatGPT-5.
 
 ## Instalación
-- Descarga la última versión: RaizQA v1.5 — https://github.com/Lorenzo-Vives/RaizQA/releases/download/1.5/RaizQA.exe
+- Descarga la última versión: RaizQA v1.5 — https://github.com/Lorenzo-Vives/RaizQA/releases/download/v.1.6/RaizQA.exe
 ## ⚠️ Nota: Windows puede mostrar una advertencia. Usa “Más información” → “Ejecutar de todas formas”.
 
 ## Crear un .app en macOS
