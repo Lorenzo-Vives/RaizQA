@@ -4,18 +4,19 @@ block_cipher = None
 
 pyside6_datas, pyside6_binaries, pyside6_hiddenimports = collect_all('PySide6')
 spellchecker_datas, spellchecker_binaries, spellchecker_hiddenimports = collect_all('spellchecker')
+openpyxl_datas, openpyxl_binaries, openpyxl_hiddenimports = collect_all('openpyxl')
 
 a = Analysis(
     ['main.py'],
     pathex=['.'],
-    binaries=pyside6_binaries + spellchecker_binaries,
-    datas=collect_data_files('pyspellchecker', includes=['resources/*']) + pyside6_datas + spellchecker_datas + [
+    binaries=pyside6_binaries + spellchecker_binaries + openpyxl_binaries,
+    datas=collect_data_files('pyspellchecker', includes=['resources/*']) + pyside6_datas + spellchecker_datas + openpyxl_datas + [
         ('gui', 'gui'),
         ('core', 'core'),
         ('code_viewer', 'code_viewer'),
-        ('resources', 'resources'),
+        ('logo1.ico', '.'),
     ],
-    hiddenimports=pyside6_hiddenimports + spellchecker_hiddenimports,
+    hiddenimports=pyside6_hiddenimports + spellchecker_hiddenimports + openpyxl_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -35,6 +36,7 @@ exe = EXE(
     a.datas,
     [],
     name='RaizQA',
+    icon='logo1.ico',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
