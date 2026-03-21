@@ -4,10 +4,11 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QListWidget, QFileDialog, QMessageBox, QInputDialog, QFrame, QLineEdit, QSizeGrip,
     QTreeWidget, QTreeWidgetItem, QMenu, QDialog, QHeaderView, QTreeWidgetItemIterator,
-    QGridLayout, QDialogButtonBox, QFileIconProvider, QAbstractItemView, QTextEdit
+    QGridLayout, QDialogButtonBox, QFileIconProvider, QAbstractItemView, QTextEdit,
+    QStackedWidget
 )
 from PySide6.QtGui import QAction, QColor, QTextCursor, QTextCharFormat, QPainter, QPixmap, QIcon, QPalette
-from PySide6.QtCore import Qt, QTimer, QPoint, QEvent, QUrl
+from PySide6.QtCore import Qt, QTimer, QPoint, QEvent
 from docx import Document
 
 from gui.dialogs.memo_dialog import MemoDialog
@@ -21,6 +22,7 @@ from gui.dialogs.themes_analysis_dialog import ThemesAnalysisDialog
 from gui.dialogs.case_study_dialog import CaseStudyDialog
 from gui.document_tree import DocumentTree
 from gui.code_tree import CodeTree
+from gui.image_viewer import ImageDocumentViewer
 from code_viewer.code_viewer import CodeViewerWindow  # Absolute import desde root
 from core.project import Project
 from gui.theme import get_theme
@@ -69,6 +71,7 @@ class RaizQAGUI(QMainWindow):
         self._search_term = ""
         self._zoom_level = 0
         self._codes_expanded = True
+        self._image_selection_info = None
 
         # -------------------- LAYOUT PRINCIPAL --------------------
         central_widget = QWidget()
@@ -386,12 +389,21 @@ class RaizQAGUI(QMainWindow):
         tab_bar_layout.addStretch()
         text_layout.addWidget(tab_bar)
 
+        self.viewer_stack = QStackedWidget()
+
         self.text_area = QTextEdit()
         self.text_area.setReadOnly(True)
         self.text_area.setContextMenuPolicy(Qt.CustomContextMenu)
         self.text_area.customContextMenuRequested.connect(self.text_context_menu)
         self.text_area.installEventFilter(self)
-        text_layout.addWidget(self.text_area, 1)
+        self.viewer_stack.addWidget(self.text_area)
+
+        self.image_viewer = ImageDocumentViewer(self)
+        self.image_viewer.selectionChanged.connect(self._on_image_selection_changed)
+        self.image_viewer.contextMenuRequested.connect(self._image_context_menu)
+        self.viewer_stack.addWidget(self.image_viewer)
+
+        text_layout.addWidget(self.viewer_stack, 1)
         content_layout.addWidget(text_card, 62)
 
         content_wrapper_layout.addWidget(content_frame, 1)
@@ -814,6 +826,7 @@ class RaizQAGUI(QMainWindow):
             }}
             """
         )
+        self.image_viewer.apply_theme(theme)
 
         self.doc_tree.setStyleSheet(
             f"""
@@ -942,6 +955,8 @@ class RaizQAGUI(QMainWindow):
         if self.current_doc == doc_name:
             self.current_doc = None
             self.text_area.clear()
+            self.image_viewer.clear_image()
+            self._show_text_viewer()
 
         self.highlights.pop(doc_name, None)
         self._remove_fragments_for_document(doc_name)
@@ -1036,6 +1051,9 @@ class RaizQAGUI(QMainWindow):
         self.doc_tree.clear()
         self.code_tree.clear()
         self.text_area.clear()
+        self.image_viewer.clear_image()
+        self._show_text_viewer()
+        self._image_selection_info = None
         self._clear_column_selection()
         if hasattr(self, "code_search_field"):
             self.code_search_field.clear()
@@ -1223,6 +1241,36 @@ class RaizQAGUI(QMainWindow):
 
     def _is_current_doc_image(self):
         return self._is_image_document(self.current_doc)
+
+    def _show_text_viewer(self):
+        self.viewer_stack.setCurrentWidget(self.text_area)
+
+    def _show_image_viewer(self):
+        self.viewer_stack.setCurrentWidget(self.image_viewer)
+
+    def _current_image_fragments(self):
+        if not self.current_doc:
+            return []
+        fragments = []
+        for code in self.codes:
+            for frag in code.get("fragments", []):
+                if frag.get("document") == self.current_doc and frag.get("type") == "image":
+                    if not frag.get("color"):
+                        frag["color"] = code.get("color", "#fff59d")
+                    fragments.append(frag)
+        return fragments
+
+    def _image_selection_payload(self):
+        rect = self.image_viewer.get_selection_rect()
+        if not rect:
+            return None
+        size = self.image_viewer.image_size()
+        if not size:
+            return None
+        return {"rect": rect, "image_size": size}
+
+    def _on_image_selection_changed(self, rect):
+        self._image_selection_info = rect
 
     def _rebuild_doc_groups_from_tree(self):
         groups = {"__root__": []}
@@ -1487,16 +1535,25 @@ class RaizQAGUI(QMainWindow):
 
     # -------------------- ZOOM --------------------
     def zoom_in(self):
+        if self._is_current_doc_image():
+            self.image_viewer.zoom_in()
+            return
         if hasattr(self, "text_area"):
             self.text_area.zoomIn(1)
             self._zoom_level += 1
 
     def zoom_out(self):
+        if self._is_current_doc_image():
+            self.image_viewer.zoom_out()
+            return
         if hasattr(self, "text_area"):
             self.text_area.zoomOut(1)
             self._zoom_level -= 1
 
     def zoom_reset(self):
+        if self._is_current_doc_image():
+            self.image_viewer.zoom_reset()
+            return
         if not hasattr(self, "text_area"):
             return
         if self._zoom_level > 0:
@@ -1571,10 +1628,12 @@ class RaizQAGUI(QMainWindow):
             if self._is_image_document(self.current_doc):
                 self._show_image_document(doc_path)
             else:
+                self._show_text_viewer()
                 text = self.current_project.read_document(self.current_doc)
                 self.text_area.setPlainText(text)
         else:
             self.text_area.clear()
+            self.image_viewer.clear_image()
 
         #  3. Restaurar los subrayados del documento nuevo
         self.highlighted = self.highlights.get(self.current_doc, []).copy()
@@ -1584,19 +1643,12 @@ class RaizQAGUI(QMainWindow):
         self.restore_highlights()
 
     def _show_image_document(self, doc_path):
-        if not os.path.exists(doc_path):
+        if not os.path.exists(doc_path) or not self.image_viewer.load_image(doc_path):
+            self._show_text_viewer()
             self.text_area.setPlainText("No se encontró la imagen en el proyecto.")
             return
-        url = QUrl.fromLocalFile(doc_path).toString()
-        name = os.path.basename(doc_path)
-        html = (
-            f"<div style='text-align:center; padding:8px;'>"
-            f"<p style='color:#666; font-size:12px;'>Imagen: {name}</p>"
-            f"<img src='{url}' style='max-width:100%; height:auto; border-radius:6px;'/>"
-            f"<p style='color:#888; font-size:11px;'>Clic derecho para codificar la imagen completa.</p>"
-            f"</div>"
-        )
-        self.text_area.setHtml(html)
+        self._show_image_viewer()
+        self.image_viewer.clear_selection()
 
     # -------------------- CARPETAS / DOCUMENTOS --------------------
     def doc_tree_context_menu(self, pos):
@@ -1700,6 +1752,7 @@ class RaizQAGUI(QMainWindow):
             if self._is_image_document(self.current_doc):
                 self._show_image_document(doc_path)
             else:
+                self._show_text_viewer()
                 text = self.current_project.read_document(self.current_doc)
                 self.text_area.setPlainText(text)
     
@@ -1718,7 +1771,7 @@ class RaizQAGUI(QMainWindow):
     # -------------------- CÓDIGOS --------------------
     def text_context_menu(self, pos):
         if self._is_current_doc_image():
-            self._image_context_menu(pos)
+            self._image_context_menu(global_pos=self.image_viewer.mapToGlobal(pos))
             return
         cursor = self.text_area.textCursor()
         selected_text = cursor.selectedText()
@@ -1766,17 +1819,18 @@ class RaizQAGUI(QMainWindow):
         elif action == zoom_reset_action:
             self.zoom_reset()
 
-    def _image_context_menu(self, pos):
+    def _image_context_menu(self, scene_pos=None, global_pos=None, target_fragment=None):
+        selection = self._image_selection_payload()
+        has_selection = bool(selection and selection.get("rect"))
         menu = QMenu()
-        create_code_action = menu.addAction("Crear nuevo codigo para imagen")
-        create_subcode_action = menu.addAction("Crear subcodigo para imagen")
+        create_code_action = menu.addAction("Crear nuevo codigo para zona" if has_selection else "Crear nuevo codigo para imagen")
+        create_subcode_action = menu.addAction("Crear subcodigo para zona" if has_selection else "Crear subcodigo para imagen")
         if self.codes:
             add_to_existing = menu.addMenu("Agregar a codigo existente")
             for c in self.codes:
-                act = add_to_existing.addAction(c["name"])
-                act.triggered.connect(lambda checked=False, name=c["name"]: self.add_image_to_existing(name))
-        else:
-            add_to_existing = None
+                code_name = c["name"]
+                act = add_to_existing.addAction(code_name)
+                act.triggered.connect(lambda checked=False, name=code_name: self.add_image_to_existing(name))
 
         if menu.actions():
             menu.addSeparator()
@@ -1784,14 +1838,19 @@ class RaizQAGUI(QMainWindow):
         zoom_out_action = menu.addAction("Disminuir zoom")
         zoom_reset_action = menu.addAction("Restablecer zoom")
 
-        action = menu.exec(self.text_area.mapToGlobal(pos))
+        menu_pos = global_pos or self.mapToGlobal(self.rect().center())
+        action = menu.exec(menu_pos)
         if action == create_code_action:
-            note = self._prompt_image_note("Nuevo codigo (imagen)", "Descripcion del fragmento (opcional):")
+            note = self._prompt_image_note(
+                "Nuevo codigo (imagen)",
+                "Descripcion del fragmento (opcional):",
+                default_text="Zona de imagen" if has_selection else "Imagen completa",
+            )
             if note is None:
                 return
-            self.create_new_code("", None, None, is_image=True, note=note)
+            self.create_new_code("", None, None, is_image=True, note=note, image_selection=selection)
         elif action == create_subcode_action:
-            self.create_subcode_for_image()
+            self.create_subcode_for_image(selection)
         elif action == zoom_in_action:
             self.zoom_in()
         elif action == zoom_out_action:
@@ -1799,20 +1858,25 @@ class RaizQAGUI(QMainWindow):
         elif action == zoom_reset_action:
             self.zoom_reset()
 
-    def _prompt_image_note(self, title, label):
-        default_text = "Imagen completa"
+    def _prompt_image_note(self, title, label, default_text="Imagen completa"):
         note, ok = QInputDialog.getText(self, title, label, text=default_text)
         if not ok:
             return None
         return note.strip() or default_text
 
-    def add_image_to_existing(self, code_name):
-        note = self._prompt_image_note("Agregar a codigo", "Descripcion del fragmento (opcional):")
+    def add_image_to_existing(self, code_name, image_selection=None):
+        selection = image_selection or self._image_selection_payload()
+        has_selection = bool(selection and selection.get("rect"))
+        note = self._prompt_image_note(
+            "Agregar a codigo",
+            "Descripcion del fragmento (opcional):",
+            default_text="Zona de imagen" if has_selection else "Imagen completa",
+        )
         if note is None:
             return
-        self.add_to_existing_code(code_name, note, None, None, is_image=True, note=note)
+        self.add_to_existing_code(code_name, note, None, None, is_image=True, note=note, image_selection=selection)
 
-    def create_subcode_for_image(self):
+    def create_subcode_for_image(self, image_selection=None):
         iterator = QTreeWidgetItemIterator(self.code_tree)
         code_names = []
         while iterator.value():
@@ -1830,16 +1894,22 @@ class RaizQAGUI(QMainWindow):
         if not ok or not sub_label:
             return
 
-        note = self._prompt_image_note("Nuevo fragmento (imagen)", "Descripcion del fragmento (opcional):")
+        selection = image_selection or self._image_selection_payload()
+        has_selection = bool(selection and selection.get("rect"))
+        note = self._prompt_image_note(
+            "Nuevo fragmento (imagen)",
+            "Descripcion del fragmento (opcional):",
+            default_text="Zona de imagen" if has_selection else "Imagen completa",
+        )
         if note is None:
             return
 
         parent_item = self.find_tree_item(parent_name)
         if parent_item:
-            self.create_new_code("", None, None, parent_item, sub_label, is_image=True, note=note)
+            self.create_new_code("", None, None, parent_item, sub_label, is_image=True, note=note, image_selection=selection)
 
-    def _build_fragment(self, text, start, end, color_hex, is_image=False):
-        return {
+    def _build_fragment(self, text, start, end, color_hex, is_image=False, image_selection=None, note=None):
+        fragment = {
             "text": text,
             "document": self.current_doc,
             "start": start,
@@ -1847,8 +1917,22 @@ class RaizQAGUI(QMainWindow):
             "color": color_hex,
             "type": "image" if is_image else "text",
         }
+        if is_image:
+            selection = image_selection or {}
+            fragment["text"] = text or "<IMAGE>"
+            fragment["comment"] = note or text or ""
+            rect = selection.get("rect")
+            image_size = selection.get("image_size")
+            if rect:
+                fragment["rect"] = rect
+                fragment["area"] = int(rect.get("w", 0) * rect.get("h", 0))
+            if image_size:
+                fragment["image_size"] = image_size
+                total = max(1, image_size.get("w", 0) * image_size.get("h", 0))
+                fragment["coverage"] = round(fragment.get("area", 0) / total, 6)
+        return fragment
 
-    def create_new_code(self, selected_text, start, end, parent_item=None, code_label=None, is_image=False, note=None):
+    def create_new_code(self, selected_text, start, end, parent_item=None, code_label=None, is_image=False, note=None, image_selection=None):
         if not self.current_doc:
             QMessageBox.warning(self, "Nuevo codigo", "Selecciona un documento antes de codificar.")
             return
@@ -1871,14 +1955,17 @@ class RaizQAGUI(QMainWindow):
         color_hex = self.ask_color_from_palette(suggested_color)
 
         if is_image:
+            selection = image_selection or self._image_selection_payload()
             note_text = note if note is not None else self._prompt_image_note("Nuevo fragmento (imagen)", "Descripcion del fragmento (opcional):")
             if note_text is None:
                 return
             selected_text = note_text
             start = None
             end = None
+        else:
+            selection = None
 
-        fragment = self._build_fragment(selected_text, start, end, color_hex, is_image=is_image)
+        fragment = self._build_fragment(selected_text, start, end, color_hex, is_image=is_image, image_selection=selection, note=note)
 
         code_item = QTreeWidgetItem([code_label, "1", ""])
         code_item.setData(0, Qt.UserRole + 1, code_label)
@@ -1901,12 +1988,14 @@ class RaizQAGUI(QMainWindow):
 
         if not is_image:
             self.highlight_fragment(fragment, QColor(color_hex))
+        else:
+            self.image_viewer.clear_selection()
         self.save_current_highlights()
         self._rebuild_codes_from_tree()
         self.save_project()
 
 
-    def add_to_existing_code(self, code_name, selected_text, start, end, is_image=False, note=None):
+    def add_to_existing_code(self, code_name, selected_text, start, end, is_image=False, note=None, image_selection=None):
         if not self.current_doc:
             return
 
@@ -1915,21 +2004,26 @@ class RaizQAGUI(QMainWindow):
             return
 
         if is_image:
+            selection = image_selection or self._image_selection_payload()
             note_text = note if note is not None else self._prompt_image_note("Agregar a codigo", "Descripcion del fragmento (opcional):")
             if note_text is None:
                 return
             selected_text = note_text
             start = None
             end = None
+        else:
+            selection = None
 
         color_hex = code_data.get("color", "#fff59d")
-        fragment = self._build_fragment(selected_text, start, end, color_hex, is_image=is_image)
+        fragment = self._build_fragment(selected_text, start, end, color_hex, is_image=is_image, image_selection=selection, note=note)
 
         code_data.setdefault("fragments", []).append(fragment)
         code_data["count"] = len(code_data["fragments"])
         self.update_code_count(code_name, code_data["count"])
         if not is_image:
             self.highlight_fragment(fragment, QColor(color_hex))
+        else:
+            self.image_viewer.clear_selection()
         self.save_current_highlights()
         self.save_project()
 
@@ -1939,6 +2033,8 @@ class RaizQAGUI(QMainWindow):
         if fragment.get("document") != self.current_doc:
             return
         if fragment.get("type") == "image" or self._is_current_doc_image():
+            if self._is_current_doc_image():
+                self.image_viewer.focus_fragment(fragment)
             return
 
         start_pos = fragment.get("start")
@@ -2277,6 +2373,7 @@ class RaizQAGUI(QMainWindow):
         if not self.current_doc:
             return
         if self._is_current_doc_image():
+            self.image_viewer.set_fragments(self.highlighted)
             return
 
         #  Limpiar resaltado previo
@@ -2311,6 +2408,8 @@ class RaizQAGUI(QMainWindow):
 
         self.highlighted = doc_fragments  # mantener en memoria para el documento actual
         self.highlights[self.current_doc] = doc_fragments
+        if self._is_current_doc_image():
+            self.image_viewer.set_fragments(doc_fragments)
 
 
     # -------------------------

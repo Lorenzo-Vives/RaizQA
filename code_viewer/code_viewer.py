@@ -2,11 +2,12 @@ import os
 import random
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QSplitter, QTextEdit, QListWidget,
-    QListWidgetItem, QLabel, QWidget, QHBoxLayout
+    QListWidgetItem, QLabel, QWidget, QHBoxLayout, QStackedWidget
 )
-from PySide6.QtCore import Qt, QSize, QUrl
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 
+from gui.image_viewer import ImageDocumentViewer
 from gui.theme import get_theme
 
 
@@ -55,7 +56,11 @@ class CodeViewerWindow(QDialog):
         self.text_view = QTextEdit()
         self.text_view.setReadOnly(True)
         self.text_view.setPlaceholderText("Selecciona un fragmento para visualizarlo aquí...")
-        viewer_layout.addWidget(self.text_view)
+        self.image_view = ImageDocumentViewer(self, read_only=True)
+        self.viewer_stack = QStackedWidget()
+        self.viewer_stack.addWidget(self.text_view)
+        self.viewer_stack.addWidget(self.image_view)
+        viewer_layout.addWidget(self.viewer_stack)
 
         splitter.addWidget(self.viewer_container)
 
@@ -97,6 +102,7 @@ class CodeViewerWindow(QDialog):
             f"padding: 10px; border: 1px solid {theme['border']}; "
             f"selection-background-color: {theme['selection']}; selection-color: {highlight_text};"
         )
+        self.image_view.apply_theme(theme)
 
         self.list_header_label.setStyleSheet(
             f"font-weight: bold; color: {theme['text_fg']}; background-color: {theme['panel_bg']}; "
@@ -157,9 +163,14 @@ class CodeViewerWindow(QDialog):
                 continue
 
             for frag in fragments:
-                preview = (frag.get("text") or "").strip().replace("\n", " ")
+                preview_source = frag.get("comment") or frag.get("text") or ""
+                preview = preview_source.strip().replace("\n", " ")
                 if not preview and frag.get("type") == "image":
-                    preview = "(Imagen)"
+                    rect = frag.get("rect") or {}
+                    if rect:
+                        preview = f"(Zona {rect.get('x', 0)},{rect.get('y', 0)} {rect.get('w', 0)}x{rect.get('h', 0)})"
+                    else:
+                        preview = "(Imagen)"
                 if len(preview) > 100:
                     preview = preview[:100] + "..."
 
@@ -208,6 +219,7 @@ class CodeViewerWindow(QDialog):
         items = self.code_list.selectedItems()
         if not items:
             self.text_view.clear()
+            self.viewer_stack.setCurrentWidget(self.text_view)
             self._reset_header_style()
             self.header_label.setText("Selecciona un fragmento...")
             return
@@ -221,20 +233,15 @@ class CodeViewerWindow(QDialog):
         is_image = frag.get("type") == "image" or (doc_name and doc_name.lower().endswith(self.IMAGE_EXTENSIONS))
         if is_image:
             img_path = os.path.join(os.path.dirname(self.document_path), doc_name)
-            if os.path.exists(img_path):
-                url = QUrl.fromLocalFile(img_path).toString()
-                html = (
-                    f"<div style='text-align:center; padding:10px;'>"
-                    f"<p style='color:{self.theme['muted_text']}; margin-bottom:6px;'>{doc_name}</p>"
-                    f"<img src='{url}' style='max-width:100%; height:auto; border-radius:6px;' />"
-                )
-                if text:
-                    html += f"<p style='color:{self.theme['muted_text']}; padding-top:8px;'>{text}</p>"
-                html += "</div>"
+            if os.path.exists(img_path) and self.image_view.load_image(img_path):
+                self.viewer_stack.setCurrentWidget(self.image_view)
+                self.image_view.set_fragments([frag], active_fragment=frag)
+                self.image_view.focus_fragment(frag)
             else:
-                html = f"<p style='color:{self.theme['muted_text']};'>Imagen no encontrada: {doc_name}</p>"
-            self.text_view.setHtml(html)
+                self.viewer_stack.setCurrentWidget(self.text_view)
+                self.text_view.setHtml(f"<p style='color:{self.theme['muted_text']};'>Imagen no encontrada: {doc_name}</p>")
         else:
+            self.viewer_stack.setCurrentWidget(self.text_view)
             self.text_view.setPlainText(text)
 
         # Color seg?n el c?digo

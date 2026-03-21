@@ -1,42 +1,111 @@
-# RaizQA 🌱
+# RaizQA
 
-RaizQA es un proyecto open source de análisis cualitativo en Python con PySide6, creado por Lorenzo Vives (Sociólogo, Magíster en Sociología PUC) con ayuda de CodexAI y ChatGPT-5.
+RaizQA es una aplicacion de analisis cualitativo escrita en Python con PySide6. Permite importar documentos de texto e imagen, crear codigos jerarquicos, registrar memos y diario de codificacion, explorar fragmentos y ejecutar vistas de analisis como comparacion de documentos, nube de palabras, temas/categorias, estudio de casos y Code Matrix Browser con heatmap.
 
-## Instalación
-- Descarga la última versión: RaizQA v1.5 — https://github.com/Lorenzo-Vives/RaizQA/releases/download/v.1.6/RaizQA.exe
-## ⚠️ Nota: Windows puede mostrar una advertencia. Usa “Más información” → “Ejecutar de todas formas”.
+## Estado actual
 
-## Crear un .app en macOS
-1) Instala dependencias en un entorno virtual:
+La entrada principal del proyecto es `main.py` y la ventana principal vive en `gui/main_window.py`.
+
+Capacidades principales:
+
+- Gestion de proyectos con guardado automatico.
+- Importacion de `.txt`, `.pdf`, `.docx` e imagenes (`.png`, `.jpg`, `.jpeg`, `.bmp`, `.gif`, `.tiff`).
+- Codificacion de texto por seleccion.
+- Codificacion de imagenes por zonas con coordenadas persistentes en espacio de imagen.
+- Arbol de codigos con subcodigos, color por codigo y memos.
+- Diario de codificacion y exportacion a Word.
+- Exportacion del sistema de codigos a Excel.
+- Visor de fragmentos codificados.
+- Comparacion de documentos.
+- Code Matrix Browser con vista tabla y heatmap.
+- Nube de palabras.
+- Agrupacion de codigos en temas/categorias.
+- Estudio de casos basado en documentos y carpetas.
+
+## Requisitos
+
+- Python 3.13 recomendado por el entorno actual del proyecto.
+- Dependencias definidas en `requirements.txt`.
+
+Instalacion local:
+
 ```bash
 python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt pyinstaller
+.venv\Scripts\activate
+pip install -r requirements.txt
 ```
-2) Empaqueta con PyInstaller usando el spec macOS:
+
+## Ejecutar en desarrollo
+
 ```bash
+python main.py
+```
+
+## Empaquetado
+
+Windows `.exe`:
+
+```bash
+pip install pyinstaller
+pyinstaller --clean RaizQA.spec
+```
+
+Salida esperada:
+
+- `dist/RaizQA.exe`
+
+macOS `.app`:
+
+```bash
+pip install pyinstaller
 pyinstaller --clean RaizQA_macos.spec
 ```
-3) El bundle queda en `dist/RaizQA.app` (abre con doble clic).  
-Opcional: coloca un icono `.icns` y actualiza `icon=` en `RaizQA_macos.spec`.
 
-## Flujo básico de uso
-1) Selecciona un Working Directory donde se guardan los proyectos.  
-2) Crea un proyecto nuevo o abre uno existente.  
-3) Importa documentos .txt, .pdf o .docx (se convierten a texto plano) o imagenes (.png, .jpg, .jpeg, .bmp, .gif, .tiff) para verlas y codificarlas.  
-4) Selecciona texto para crear códigos y subcódigos (árbol jerárquico).  
-5) Clic derecho en un código para crear/editar memos (con corrector ortográfico).  
-6) Lleva tu diario de codificación (botón Diario) y expórtalo a Word con “Exportar diario”.  
-7) Exporta el libro de códigos a Excel y los fragmentos a Word con “Exportar códigos”.  
-8) Usa “Ver Códigos” para visualizar todos los fragmentos codificados.
+Salida esperada:
 
-## Guardado automático
-El proyecto se guarda automáticamente cada 30 segundos.
+- `dist/RaizQA.app`
 
-## Tecnologías
-- Python  
-- PySide6  
-- IA: CodexAI y ChatGPT-5
+Linux:
+
+- El proyecto puede ejecutarse desde codigo fuente.
+- No existe aun un spec dedicado de Linux en este repositorio.
+
+## Documentacion
+
+- Guia de usuario: `docs/USER_GUIDE.md`
+- Guia tecnica y de desarrollo: `docs/DEVELOPER_GUIDE.md`
+- Modelo de datos y persistencia: `docs/DATA_MODEL.md`
+
+## Estructura del repositorio
+
+```text
+.
+|-- main.py
+|-- requirements.txt
+|-- RaizQA.spec
+|-- RaizQA_macos.spec
+|-- core/
+|   |-- project.py
+|   `-- memos.py
+|-- gui/
+|   |-- main_window.py
+|   |-- image_viewer.py
+|   |-- theme.py
+|   |-- document_tree.py
+|   |-- code_tree.py
+|   `-- dialogs/
+|-- code_viewer/
+|   `-- code_viewer.py
+|-- data/
+|-- memos/
+`-- models/
+```
+
+## Notas de mantenimiento
+
+- `main.py` + `gui/main_window.py` representan la aplicacion activa.
+- Existen archivos historicos o de transicion como `gui_raizQA.py`, `gui_raizQA_pyside.py` y partes de `models/`. No son la ruta principal de ejecucion actual.
 
 ## Licencia
-MIT License — Copyright (c) 2025 Lorenzo Vives
+
+MIT License.

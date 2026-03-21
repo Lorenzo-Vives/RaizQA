@@ -12,7 +12,13 @@ class CodeFragmentsDialog(QDialog):
         self.list_widget = QListWidget()
         for frag in fragments:
             # mostrar preview para la lista
-            preview = frag.get("text", "").strip().replace("\n", " ")
+            preview = (frag.get("comment") or frag.get("text") or "").strip().replace("\n", " ")
+            if not preview and frag.get("type") == "image":
+                rect = frag.get("rect") or {}
+                if rect:
+                    preview = f"(Zona {rect.get('x', 0)},{rect.get('y', 0)} {rect.get('w', 0)}x{rect.get('h', 0)})"
+                else:
+                    preview = "(Imagen)"
             if len(preview) > 200:
                 preview = preview[:200] + "..."
             # incluir documento corto si viene
@@ -39,4 +45,4 @@ class CodeFragmentsDialog(QDialog):
             self.viewer.clear()
             return
         frag = items[0].data(Qt.UserRole)
-        self.viewer.setPlainText(frag.get("text", ""))
+        self.viewer.setPlainText((frag.get("comment") or frag.get("text") or "").strip())
