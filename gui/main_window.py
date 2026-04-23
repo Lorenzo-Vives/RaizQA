@@ -365,11 +365,16 @@ class RaizQAGUI(QMainWindow):
         self.code_tree.setAcceptDrops(True)
         self.code_tree.setDropIndicatorShown(True)
         self.code_tree.setDefaultDropAction(Qt.MoveAction)
+        self.code_tree.setEditTriggers(QAbstractItemView.NoEditTriggers)
         code_layout.addWidget(self.code_tree, 60)
         left_layout.addWidget(code_card, 2)
 
         # Eventos
+        self._code_tree_updating = False
         self.code_tree.itemPressed.connect(self._on_code_tree_item_clicked)
+        self.code_tree.itemDoubleClicked.connect(self._on_code_tree_item_double_clicked)
+        self.code_tree.itemChanged.connect(self._on_code_tree_item_changed)
+        self.code_tree.itemDelegate().closeEditor.connect(self._on_code_tree_editor_closed)
         self.code_tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.code_tree.customContextMenuRequested.connect(self.code_tree_context_menu)
 
@@ -879,13 +884,20 @@ class RaizQAGUI(QMainWindow):
 
         code_name = self._code_item_name(item)
         menu = QMenu()
+        rename_action = menu.addAction("Renombrar codigo")
+        view_fragments_action = menu.addAction("Ver fragmentos")
+        menu.addSeparator()
 
         view_memo_action = menu.addAction("👁️ Ver memo")
         add_memo_action = menu.addAction("📝 Agregar / editar memo")
         delete_memo_action = menu.addAction("❌ Eliminar memo")
 
         action = menu.exec(self.code_tree.viewport().mapToGlobal(pos))
-        if action == view_memo_action:
+        if action == rename_action:
+            self._start_code_rename(item)
+        elif action == view_fragments_action:
+            self.show_code_fragments(item, 1)
+        elif action == view_memo_action:
             self.view_memo(code_name)
         elif action == add_memo_action:
             self.add_or_edit_memo(code_name)
@@ -999,7 +1011,49 @@ class RaizQAGUI(QMainWindow):
             code_name = self._code_item_name(item)
             self.add_or_edit_memo(code_name)
             return
-        self.show_code_fragments(item, column)
+        if column == 1:
+            self.show_code_fragments(item, column)
+
+    def _on_code_tree_item_double_clicked(self, item, column):
+        if column == 0:
+            self._start_code_rename(item)
+
+    def _on_code_tree_editor_closed(self, editor, hint):
+        item = self.code_tree.currentItem()
+        if item:
+            QTimer.singleShot(0, lambda item=item: self._restore_code_item_label(item))
+
+    def _start_code_rename(self, item):
+        if not item:
+            return
+        code_name = self._code_item_name(item)
+        self._code_tree_updating = True
+        item.setText(0, code_name)
+        self._code_tree_updating = False
+        self.code_tree.setCurrentItem(item, 0)
+        self.code_tree.editItem(item, 0)
+
+    def _on_code_tree_item_changed(self, item, column):
+        if self._code_tree_updating or column != 0:
+            return
+
+        old_name = self._code_item_name(item)
+        new_name = item.text(0).strip()
+        if new_name == old_name:
+            self._restore_code_item_label(item)
+            return
+
+        if not new_name:
+            self._restore_code_item_label(item)
+            QMessageBox.warning(self, "Renombrar codigo", "El nombre del codigo no puede quedar vacio.")
+            return
+
+        if self._code_name_exists(new_name, exclude_item=item):
+            self._restore_code_item_label(item)
+            QMessageBox.warning(self, "Renombrar codigo", "Ya existe un codigo con ese nombre.")
+            return
+
+        self._rename_code(old_name, new_name, item)
 
     # -------------------- FUNCIONES BÁSICAS --------------------
     def select_working_dir(self):
@@ -1366,13 +1420,69 @@ class RaizQAGUI(QMainWindow):
 
     def _configure_code_item(self, item):
         flags = item.flags()
-        item.setFlags(flags | Qt.ItemIsDragEnabled | Qt.ItemIsDropEnabled | Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+        item.setFlags(
+            flags
+            | Qt.ItemIsDragEnabled
+            | Qt.ItemIsDropEnabled
+            | Qt.ItemIsEnabled
+            | Qt.ItemIsSelectable
+            | Qt.ItemIsEditable
+        )
 
     def _code_item_name(self, item):
         stored = item.data(0, Qt.UserRole + 1)
         if stored:
             return stored
         return item.text(0).strip()
+
+    def _code_name_exists(self, name, exclude_item=None):
+        iterator = QTreeWidgetItemIterator(self.code_tree)
+        while iterator.value():
+            item = iterator.value()
+            if item is not exclude_item and self._code_item_name(item) == name:
+                return True
+            iterator += 1
+        return any(code.get("name") == name for code in self.codes if not self.find_tree_item(code.get("name")))
+
+    def _restore_code_item_label(self, item):
+        if not item:
+            return
+        code_name = self._code_item_name(item)
+        code_data = self.get_code_data(code_name)
+        self._code_tree_updating = True
+        if code_data:
+            self.apply_code_item_color(item, code_data.get("color", "#fff59d"))
+        else:
+            item.setText(0, code_name)
+        self._code_tree_updating = False
+
+    def _rename_code(self, old_name, new_name, item):
+        code_data = self.get_code_data(old_name)
+        if not code_data:
+            self._restore_code_item_label(item)
+            return
+
+        code_data["name"] = new_name
+        for code in self.codes:
+            if code.get("parent") == old_name:
+                code["parent"] = new_name
+
+        self._rename_code_in_themes(old_name, new_name)
+        if self.memo_manager and hasattr(self.memo_manager, "rename_memo"):
+            self.memo_manager.rename_memo(old_name, new_name)
+
+        self._code_tree_updating = True
+        item.setData(0, Qt.UserRole + 1, new_name)
+        self.apply_code_item_color(item, code_data.get("color", "#fff59d"))
+        self._code_tree_updating = False
+
+        self._rebuild_codes_from_tree()
+        self.save_project()
+
+    def _rename_code_in_themes(self, old_name, new_name):
+        for theme in self.code_themes:
+            codes = theme.get("codes") or []
+            theme["codes"] = [new_name if code == old_name else code for code in codes]
 
     # -------------------- SELECCIÓN COLUMNAR EN TEXTO --------------------
     def eventFilter(self, obj, event):
@@ -2197,7 +2307,7 @@ class RaizQAGUI(QMainWindow):
         if not self.codes:
             QMessageBox.information(self, "Code Matrix", "No hay códigos creados aún.")
             return
-        dialog = CodeMatrixDialog(docs, self.codes, parent=self)
+        dialog = CodeMatrixDialog(docs, self.codes, current_doc=self.current_doc, parent=self)
         dialog.exec()
 
     def open_wordcloud_dialog(self):

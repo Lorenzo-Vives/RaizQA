@@ -44,3 +44,9 @@ class MemoManager:
         if code_label in self.memos:
             del self.memos[code_label]
             self.save_memos()
+
+    def rename_memo(self, old_label, new_label):
+        if old_label == new_label or old_label not in self.memos:
+            return
+        self.memos[new_label] = self.memos.pop(old_label)
+        self.save_memos()
