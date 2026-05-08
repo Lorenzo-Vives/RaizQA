@@ -2,7 +2,7 @@ import os
 import random
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QSplitter, QTextEdit, QListWidget,
-    QListWidgetItem, QLabel, QWidget, QHBoxLayout, QStackedWidget
+    QListWidgetItem, QLabel, QWidget, QHBoxLayout, QStackedWidget, QLineEdit
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
@@ -71,6 +71,16 @@ class CodeViewerWindow(QDialog):
         bottom_layout = QVBoxLayout(bottom_container)
         bottom_layout.setContentsMargins(0, 0, 0, 0)
 
+        search_row = QHBoxLayout()
+        self.code_search_field = QLineEdit()
+        self.code_search_field.setPlaceholderText("Buscar código por nombre")
+        self.code_search_field.textChanged.connect(self.filter_code_list_by_name)
+        self.search_count_label = QLabel("")
+        self.search_count_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        search_row.addWidget(self.code_search_field, 1)
+        search_row.addWidget(self.search_count_label)
+        bottom_layout.addLayout(search_row)
+
         # Encabezado visual
         self.list_header_label = QLabel("📄 Documento | 🏷️ Código | ✂️ Fragmento")
         bottom_layout.addWidget(self.list_header_label)
@@ -107,6 +117,14 @@ class CodeViewerWindow(QDialog):
         self.list_header_label.setStyleSheet(
             f"font-weight: bold; color: {theme['text_fg']}; background-color: {theme['panel_bg']}; "
             f"padding: 6px 10px; border-bottom: 1px solid {theme['border']};"
+        )
+
+        self.code_search_field.setStyleSheet(
+            f"background-color: {theme['text_bg']}; color: {theme['text_fg']}; "
+            f"border: 1px solid {theme['border']}; padding: 6px 8px;"
+        )
+        self.search_count_label.setStyleSheet(
+            f"color: {theme['muted_text']}; font-size: 12px; padding-right: 6px;"
         )
 
         self.code_list.setStyleSheet(
@@ -212,6 +230,35 @@ class CodeViewerWindow(QDialog):
                 item.setData(Qt.UserRole, (code, frag))
                 self.code_list.addItem(item)
                 self.code_list.setItemWidget(item, item_widget)
+
+        self.filter_code_list_by_name(self.code_search_field.text())
+
+    def filter_code_list_by_name(self, text):
+        """Filtra la lista solo por nombre de código, no por contenido de fragmentos."""
+        term = (text or "").strip().lower()
+        visible_count = 0
+
+        for idx in range(self.code_list.count()):
+            item = self.code_list.item(idx)
+            data = item.data(Qt.UserRole)
+            code = data[0] if data else {}
+            code_name = (code.get("name", "") if isinstance(code, dict) else "").lower()
+            matches = not term or term in code_name
+            item.setHidden(not matches)
+            if matches:
+                visible_count += 1
+
+        current_item = self.code_list.currentItem()
+        if current_item and current_item.isHidden():
+            self.code_list.clearSelection()
+            self.on_code_selected()
+
+        if not term:
+            self.search_count_label.setText(f"{visible_count} resultados")
+        elif visible_count == 1:
+            self.search_count_label.setText("1 coincidencia")
+        else:
+            self.search_count_label.setText(f"{visible_count} coincidencias")
 
     # ------------------------------------------------------------------
     def on_code_selected(self):

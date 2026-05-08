@@ -2,7 +2,7 @@ import os
 import shutil
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QListWidget, QFileDialog, QMessageBox, QInputDialog, QFrame, QLineEdit, QSizeGrip,
+    QListWidget, QListWidgetItem, QFileDialog, QMessageBox, QInputDialog, QFrame, QLineEdit, QSizeGrip,
     QTreeWidget, QTreeWidgetItem, QMenu, QDialog, QHeaderView, QTreeWidgetItemIterator,
     QGridLayout, QDialogButtonBox, QFileIconProvider, QAbstractItemView, QTextEdit,
     QStackedWidget
@@ -198,11 +198,17 @@ class RaizQAGUI(QMainWindow):
         self.btn_view_codes = QPushButton("📚 Ver Códigos")
         self.btn_view_codes.clicked.connect(self.open_code_viewer)
 
+        self.btn_add_code = QPushButton("Agregar código")
+        self.btn_add_code.clicked.connect(self.add_code_from_toolbar)
+
         self.btn_themes_categories = QPushButton("Temas y categorías")
         self.btn_themes_categories.clicked.connect(self.open_themes_categories)
 
-        self.btn_export_codes = QPushButton("Exportar códigos")
+        self.btn_export_codes = QPushButton("Exportar libro de códigos")
         self.btn_export_codes.clicked.connect(self.export_code_tree)
+
+        self.btn_export_fragments = QPushButton("Exportar fragmentos")
+        self.btn_export_fragments.clicked.connect(self.export_code_fragments)
 
         self.btn_compare = QPushButton("Comparar documentos")
         self.btn_compare.clicked.connect(self.open_compare_dialog)
@@ -265,7 +271,7 @@ class RaizQAGUI(QMainWindow):
         codes_layout = QVBoxLayout(self.actions_codes)
         codes_layout.setContentsMargins(0, 0, 0, 0)
         codes_layout.setSpacing(6)
-        add_action_row(codes_layout, [self.btn_view_codes, self.btn_themes_categories, self.btn_export_codes, self.btn_diary, self.btn_export_diary])
+        add_action_row(codes_layout, [self.btn_add_code, self.btn_view_codes, self.btn_themes_categories, self.btn_export_codes, self.btn_export_fragments, self.btn_diary, self.btn_export_diary])
 
         self.actions_analysis = QWidget()
         analysis_layout = QVBoxLayout(self.actions_analysis)
@@ -440,7 +446,8 @@ class RaizQAGUI(QMainWindow):
             ("Importar Archivo", self.import_file),
             ("Guardar Proyecto", self.save_project),
             ("Guardar Proyecto Como...", self.save_project_as),
-            ("Exportar códigos", self.export_code_tree),
+            ("Exportar libro de códigos", self.export_code_tree),
+            ("Exportar fragmentos", self.export_code_fragments),
             ("Exportar diario (Word)", self.export_diary),
             ("Comparar documentos", self.open_compare_dialog),
         ]
@@ -875,25 +882,33 @@ class RaizQAGUI(QMainWindow):
 
     # -------------------- MEMOS --------------------
     def code_tree_context_menu(self, pos):
-        if not self.current_project or not self.memo_manager:
+        if not self.current_project:
             return
 
         item = self.code_tree.itemAt(pos)
-        if not item:
-            return
-
-        code_name = self._code_item_name(item)
+        code_name = self._code_item_name(item) if item else None
         menu = QMenu()
-        rename_action = menu.addAction("Renombrar codigo")
-        view_fragments_action = menu.addAction("Ver fragmentos")
-        menu.addSeparator()
+        add_code_action = menu.addAction("Agregar código")
+        rename_action = None
+        view_fragments_action = None
+        view_memo_action = None
+        add_memo_action = None
+        delete_memo_action = None
 
-        view_memo_action = menu.addAction("👁️ Ver memo")
-        add_memo_action = menu.addAction("📝 Agregar / editar memo")
-        delete_memo_action = menu.addAction("❌ Eliminar memo")
+        if item and self.memo_manager:
+            menu.addSeparator()
+            rename_action = menu.addAction("Renombrar codigo")
+            view_fragments_action = menu.addAction("Ver fragmentos")
+            menu.addSeparator()
+
+            view_memo_action = menu.addAction("👁️ Ver memo")
+            add_memo_action = menu.addAction("📝 Agregar / editar memo")
+            delete_memo_action = menu.addAction("❌ Eliminar memo")
 
         action = menu.exec(self.code_tree.viewport().mapToGlobal(pos))
-        if action == rename_action:
+        if action == add_code_action:
+            self.prompt_add_code(parent_item=item)
+        elif action == rename_action:
             self._start_code_rename(item)
         elif action == view_fragments_action:
             self.show_code_fragments(item, 1)
@@ -2018,6 +2033,40 @@ class RaizQAGUI(QMainWindow):
         if parent_item:
             self.create_new_code("", None, None, parent_item, sub_label, is_image=True, note=note, image_selection=selection)
 
+    def add_code_from_toolbar(self):
+        self.prompt_add_code()
+
+    def prompt_add_code(self, parent_item=None):
+        if not self.current_project:
+            QMessageBox.warning(self, "Agregar codigo", "Primero abre o crea un proyecto.")
+            return
+
+        parent_name = self._code_item_name(parent_item) if parent_item else None
+        prompt_title = "Agregar subcodigo" if parent_name else "Agregar codigo"
+        prompt_label = f"Nombre del codigo hijo de '{parent_name}':" if parent_name else "Nombre del codigo:"
+        code_label, ok = QInputDialog.getText(self, prompt_title, prompt_label)
+        if not ok:
+            return
+
+        code_label = (code_label or "").strip()
+        if not code_label:
+            QMessageBox.warning(self, "Agregar codigo", "El nombre del codigo no puede quedar vacio.")
+            return
+
+        if self._code_name_exists(code_label):
+            QMessageBox.warning(self, "Agregar codigo", "Ya existe un codigo con ese nombre.")
+            return
+
+        parent_color = None
+        if parent_name:
+            parent_data = self.get_code_data(parent_name)
+            parent_color = parent_data.get("color") if parent_data else None
+
+        color_hex = self.ask_color_from_palette(parent_color or self.next_palette_color())
+        self._append_code_entry(code_label, parent_item=parent_item, color_hex=color_hex)
+        self._rebuild_codes_from_tree()
+        self.save_project()
+
     def _build_fragment(self, text, start, end, color_hex, is_image=False, image_selection=None, note=None):
         fragment = {
             "text": text,
@@ -2054,6 +2103,13 @@ class RaizQAGUI(QMainWindow):
             code_label, ok = QInputDialog.getText(self, prompt_title, "Nombre del codigo:")
             if not ok or not code_label:
                 return
+        code_label = code_label.strip()
+        if not code_label:
+            QMessageBox.warning(self, "Nuevo codigo", "El nombre del codigo no puede quedar vacio.")
+            return
+        if self._code_name_exists(code_label):
+            QMessageBox.warning(self, "Nuevo codigo", "Ya existe un codigo con ese nombre.")
+            return
 
         parent_name = self._code_item_name(parent_item) if parent_item else None
         parent_color = None
@@ -2076,25 +2132,7 @@ class RaizQAGUI(QMainWindow):
             selection = None
 
         fragment = self._build_fragment(selected_text, start, end, color_hex, is_image=is_image, image_selection=selection, note=note)
-
-        code_item = QTreeWidgetItem([code_label, "1", ""])
-        code_item.setData(0, Qt.UserRole + 1, code_label)
-        self._configure_code_item(code_item)
-        if parent_item:
-            parent_item.addChild(code_item)
-            parent_item.setExpanded(True)
-        else:
-            self.code_tree.addTopLevelItem(code_item)
-        self.apply_code_item_color(code_item, color_hex)
-
-        self.codes.append({
-            "name": code_label,
-            "parent": parent_name,
-            "memo": "",
-            "color": color_hex,
-            "count": 1,
-            "fragments": [fragment]
-        })
+        self._append_code_entry(code_label, parent_item=parent_item, color_hex=color_hex, fragment=fragment)
 
         if not is_image:
             self.highlight_fragment(fragment, QColor(color_hex))
@@ -2103,6 +2141,32 @@ class RaizQAGUI(QMainWindow):
         self.save_current_highlights()
         self._rebuild_codes_from_tree()
         self.save_project()
+
+    def _append_code_entry(self, code_label, parent_item=None, color_hex=None, fragment=None):
+        parent_name = self._code_item_name(parent_item) if parent_item else None
+        stored_color = color_hex or self.next_palette_color()
+        fragments = [fragment] if fragment else []
+        count = len(fragments)
+
+        code_item = QTreeWidgetItem([code_label, str(count), ""])
+        code_item.setData(0, Qt.UserRole + 1, code_label)
+        self._configure_code_item(code_item)
+        if parent_item:
+            parent_item.addChild(code_item)
+            parent_item.setExpanded(True)
+        else:
+            self.code_tree.addTopLevelItem(code_item)
+        self.apply_code_item_color(code_item, stored_color)
+
+        self.codes.append({
+            "name": code_label,
+            "parent": parent_name,
+            "memo": "",
+            "color": stored_color,
+            "count": count,
+            "fragments": fragments,
+        })
+        return code_item
 
 
     def add_to_existing_code(self, code_name, selected_text, start, end, is_image=False, note=None, image_selection=None):
@@ -2358,94 +2422,195 @@ class RaizQAGUI(QMainWindow):
     # -------------------- EXPORTAR SISTEMA DE CÓDIGOS --------------------
     def export_code_tree(self):
         if not self.codes:
-            QMessageBox.information(self, "Exportar códigos", "No hay códigos para exportar.")
+            QMessageBox.information(self, "Exportar libro de códigos", "No hay códigos para exportar.")
             return
 
+        excel_deps = self._load_excel_export_dependencies("Exportar libro de códigos")
+        if not excel_deps:
+            return
+        Workbook, _, _, _ = excel_deps
+
+        path = self._ask_excel_export_path("Guardar libro de códigos", "libro_de_codigos.xlsx")
+        if not path:
+            return
+
+        rows = self._collect_code_rows_for_export()
+        if not rows:
+            QMessageBox.information(self, "Exportar libro de códigos", "No se encontraron códigos en el árbol.")
+            return
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Libro de códigos"
+        self._write_codebook_sheet(ws, rows, title_text="Libro de códigos", frequency_label="Frecuencia")
+        self._save_excel_workbook(wb, path, "Exportar libro de códigos", "Libro de códigos exportado en:")
+
+    def export_code_fragments(self):
+        if not self.codes:
+            QMessageBox.information(self, "Exportar fragmentos", "No hay códigos para exportar.")
+            return
+
+        excel_deps = self._load_excel_export_dependencies("Exportar fragmentos")
+        if not excel_deps:
+            return
+        Workbook, _, _, _ = excel_deps
+
+        rows = self._collect_code_rows_for_export(text_only=True)
+        if not rows:
+            QMessageBox.information(self, "Exportar fragmentos", "No hay fragmentos de texto asociados a códigos o subcódigos.")
+            return
+
+        dialog = ExportCodeSelectionDialog(rows, parent=self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+
+        selected_names = dialog.selected_code_names()
+        if not selected_names:
+            QMessageBox.information(self, "Exportar fragmentos", "Selecciona al menos un código o subcódigo.")
+            return
+
+        selected_rows = self._collect_code_rows_for_export(selected_names=selected_names, text_only=True)
+        if not selected_rows:
+            QMessageBox.information(self, "Exportar fragmentos", "Los códigos seleccionados no tienen fragmentos de texto para exportar.")
+            return
+
+        path = self._ask_excel_export_path("Guardar fragmentos", "fragmentos_codificados.xlsx")
+        if not path:
+            return
+
+        fragment_rows = self._collect_text_fragments_for_export(selected_names)
+        wb = Workbook()
+        ws_codes = wb.active
+        ws_codes.title = "Libro de códigos"
+        self._write_codebook_sheet(ws_codes, selected_rows, title_text="Libro de códigos", frequency_label="Fragmentos")
+
+        ws_fragments = wb.create_sheet("Fragmentos")
+        self._write_fragments_sheet(ws_fragments, fragment_rows)
+
+        self._save_excel_workbook(
+            wb,
+            path,
+            "Exportar fragmentos",
+            "Libro de códigos y fragmentos exportados en:",
+        )
+
+    def _load_excel_export_dependencies(self, dialog_title):
         try:
             from openpyxl import Workbook
             from openpyxl.styles import Font, PatternFill, Alignment
         except ImportError:
             QMessageBox.critical(
                 self,
-                "Exportar códigos",
+                dialog_title,
                 "Falta la dependencia 'openpyxl'. Agrega 'openpyxl' a requirements e instálala para exportar.",
             )
-            return
+            return None
+        return Workbook, Font, PatternFill, Alignment
 
+    def _ask_excel_export_path(self, dialog_title, default_filename):
         save_dir = self.working_dir or os.getcwd()
-        default_path = os.path.join(save_dir, "codigos.xlsx")
+        default_path = os.path.join(save_dir, default_filename)
         path, _ = QFileDialog.getSaveFileName(
             self,
-            "Guardar sistema de códigos",
+            dialog_title,
             default_path,
             "Excel (*.xlsx)",
         )
-        if not path:
-            return
+        return path
 
-        rows = list(self._collect_code_rows_for_export())
-        if not rows:
-            QMessageBox.information(self, "Exportar códigos", "No se encontraron códigos en el árbol.")
-            return
+    def _save_excel_workbook(self, workbook, path, dialog_title, success_message):
+        try:
+            workbook.save(path)
+            QMessageBox.information(self, dialog_title, f"{success_message}\n{path}")
+        except Exception as exc:
+            QMessageBox.critical(self, dialog_title, f"No se pudo guardar el archivo:\n{exc}")
 
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "Códigos"
-
-        header = ["Sistema de códigos", "", "", "", "Memo", "Frecuencia"]
-        ws.append(header)
+    def _write_codebook_sheet(self, worksheet, rows, title_text="Libro de códigos", frequency_label="Frecuencia"):
+        _, Font, PatternFill, Alignment = self._load_excel_export_dependencies(title_text)
+        header = [title_text, "", "", "", "Memo", frequency_label]
+        worksheet.append(header)
 
         header_fill = PatternFill(start_color="5d9bd3", end_color="5d9bd3", fill_type="solid")
+        data_fill = PatternFill(start_color="f6f8fb", end_color="f6f8fb", fill_type="solid")
         bold = Font(bold=True)
+        memo_col = 5
+        freq_col = 6
+
         for col_idx in range(1, len(header) + 1):
-            cell = ws.cell(row=1, column=col_idx)
+            cell = worksheet.cell(row=1, column=col_idx)
             cell.font = bold
             cell.fill = header_fill
             cell.alignment = Alignment(vertical="center")
 
-        memo_col = 5
-        freq_col = 6
-        data_fill = PatternFill(start_color="f6f8fb", end_color="f6f8fb", fill_type="solid")
-        for level, name, memo, freq in rows:
+        for row_data in rows:
+            level = row_data["level"]
             total_cols = max(freq_col, 1 + level)
             row = ["" for _ in range(total_cols)]
             name_col = 1 + level
-            row[name_col - 1] = name
+            row[name_col - 1] = row_data["name"]
             if memo_col - 1 >= len(row):
                 row.extend([""] * (memo_col - len(row)))
-            row[memo_col - 1] = memo or ""
+            row[memo_col - 1] = row_data.get("memo") or ""
             if freq_col - 1 >= len(row):
                 row.extend([""] * (freq_col - len(row)))
-            row[freq_col - 1] = freq if freq is not None else ""
-            ws.append(row)
-            # si la fila tiene información en alguna columna, colorear toda la fila
-            if any(str(cell).strip() for cell in row):
-                current_row = ws.max_row
-                for col_idx in range(1, freq_col + 1):
-                    cell = ws.cell(row=current_row, column=col_idx)
-                    cell.fill = data_fill
+            row[freq_col - 1] = row_data.get("freq", "")
+            worksheet.append(row)
+            current_row = worksheet.max_row
+            for col_idx in range(1, freq_col + 1):
+                cell = worksheet.cell(row=current_row, column=col_idx)
+                cell.fill = data_fill
+                cell.alignment = Alignment(vertical="top", wrap_text=True)
 
-        ws.column_dimensions["A"].width = 36
-        ws.column_dimensions["B"].width = 36
-        ws.column_dimensions["C"].width = 36
-        ws.column_dimensions["D"].width = 36
-        ws.column_dimensions["E"].width = 48
-        ws.column_dimensions["F"].width = 14
+        for col_name in ("A", "B", "C", "D"):
+            worksheet.column_dimensions[col_name].width = 36
+        worksheet.column_dimensions["E"].width = 48
+        worksheet.column_dimensions["F"].width = 14
 
-        for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=freq_col):
+        for row in worksheet.iter_rows(min_row=1, max_row=worksheet.max_row, min_col=1, max_col=freq_col):
             for cell in row:
                 cell.alignment = Alignment(vertical="top", wrap_text=True)
 
-        try:
-            wb.save(path)
-            QMessageBox.information(self, "Exportar códigos", f"Sistema de códigos exportado en:\n{path}")
-        except Exception as exc:
-            QMessageBox.critical(self, "Exportar códigos", f"No se pudo guardar el archivo:\n{exc}")
+    def _write_fragments_sheet(self, worksheet, fragment_rows):
+        _, Font, PatternFill, Alignment = self._load_excel_export_dependencies("Exportar fragmentos")
+        header = ["Código", "Documento", "Fragmento", "Memo"]
+        worksheet.append(header)
 
-    def _collect_code_rows_for_export(self):
-        """Devuelve tuplas (nivel, nombre, memo, frecuencia) respetando el orden del arbol."""
+        header_fill = PatternFill(start_color="5d9bd3", end_color="5d9bd3", fill_type="solid")
+        data_fill = PatternFill(start_color="f6f8fb", end_color="f6f8fb", fill_type="solid")
+        bold = Font(bold=True)
+
+        for col_idx in range(1, len(header) + 1):
+            cell = worksheet.cell(row=1, column=col_idx)
+            cell.font = bold
+            cell.fill = header_fill
+            cell.alignment = Alignment(vertical="center")
+
+        for fragment in fragment_rows:
+            worksheet.append([
+                fragment.get("code_name", ""),
+                fragment.get("document", ""),
+                fragment.get("text", ""),
+                fragment.get("memo", ""),
+            ])
+            current_row = worksheet.max_row
+            for col_idx in range(1, len(header) + 1):
+                cell = worksheet.cell(row=current_row, column=col_idx)
+                cell.fill = data_fill
+                cell.alignment = Alignment(vertical="top", wrap_text=True)
+
+        worksheet.column_dimensions["A"].width = 28
+        worksheet.column_dimensions["B"].width = 28
+        worksheet.column_dimensions["C"].width = 100
+        worksheet.column_dimensions["D"].width = 48
+
+    def _collect_code_rows_for_export(self, selected_names=None, text_only=False):
+        """Devuelve filas del árbol de códigos respetando el orden visual actual."""
         if not self.code_tree:
             return []
+
+        selected_set = set(selected_names or [])
+        use_filter = bool(selected_set)
+        rows = []
 
         def memo_for(name):
             if self.memo_manager:
@@ -2453,24 +2618,78 @@ class RaizQAGUI(QMainWindow):
             code_data = self.get_code_data(name)
             return code_data.get("memo") if code_data else ""
 
+        def fragments_for(code_data):
+            fragments = list((code_data or {}).get("fragments", []) or [])
+            if text_only:
+                fragments = [frag for frag in fragments if (frag.get("type") or "text") != "image"]
+            return fragments
+
         def freq_for(code_data):
             if not code_data:
                 return ""
+            if text_only:
+                return len(fragments_for(code_data))
             if "count" in code_data:
                 return code_data.get("count")
-            return len(code_data.get("fragments", []))
+            return len(fragments_for(code_data))
 
         def walk(item, level):
             name = self._code_item_name(item)
-            data = self.get_code_data(name)
-            yield (level, name, memo_for(name) or "", freq_for(data))
+            code_data = self.get_code_data(name)
+            include_row = (not use_filter or name in selected_set) and (not text_only or freq_for(code_data) > 0)
+            if include_row:
+                rows.append({
+                    "level": level,
+                    "name": name,
+                    "memo": memo_for(name) or "",
+                    "freq": freq_for(code_data),
+                })
             for idx in range(item.childCount()):
-                child = item.child(idx)
-                yield from walk(child, level + 1)
+                walk(item.child(idx), level + 1)
 
         for idx in range(self.code_tree.topLevelItemCount()):
-            item = self.code_tree.topLevelItem(idx)
-            yield from walk(item, 0)
+            walk(self.code_tree.topLevelItem(idx), 0)
+        return rows
+
+    def _collect_text_fragments_for_export(self, selected_names):
+        fragments = []
+        for row in self._collect_code_rows_for_export(selected_names=selected_names, text_only=True):
+            code_name = row["name"]
+            code_data = self.get_code_data(code_name)
+            if not code_data:
+                continue
+            for fragment in code_data.get("fragments", []) or []:
+                if (fragment.get("type") or "text") == "image":
+                    continue
+                fragments.append({
+                    "code_name": code_name,
+                    "document": fragment.get("document", ""),
+                    "text": self._resolve_fragment_export_text(fragment),
+                    "memo": row.get("memo", ""),
+                })
+        return fragments
+
+    def _resolve_fragment_export_text(self, fragment):
+        text = fragment.get("text") or ""
+        if text and text != "<IMAGE>":
+            return text.replace("\u2029", "\n").replace("\u2028", "\n")
+
+        if not self.current_project:
+            return ""
+
+        doc_name = fragment.get("document")
+        if not doc_name or self._is_image_document(doc_name):
+            return ""
+
+        start = fragment.get("start")
+        end = fragment.get("end")
+        if start is None or end is None or end <= start:
+            return ""
+
+        doc_text = self.current_project.read_document(doc_name)
+        if end > len(doc_text):
+            return ""
+        return doc_text[start:end].replace("\u2029", "\n").replace("\u2028", "\n")
 
     # -------------------- DESTACADO --------------------
     def highlight_selection(self, cursor, color):
@@ -2609,6 +2828,53 @@ class RaizQAGUI(QMainWindow):
                 walk(item.child(i))
         for idx in range(self.code_tree.topLevelItemCount()):
             walk(self.code_tree.topLevelItem(idx))
+
+class ExportCodeSelectionDialog(QDialog):
+    def __init__(self, code_rows, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Exportar fragmentos")
+        self.resize(520, 420)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("Selecciona los códigos o subcódigos cuyos fragmentos deseas exportar:"))
+
+        controls = QHBoxLayout()
+        btn_select_all = QPushButton("Seleccionar todo")
+        btn_clear = QPushButton("Limpiar selección")
+        btn_select_all.clicked.connect(lambda: self._set_all_items(Qt.Checked))
+        btn_clear.clicked.connect(lambda: self._set_all_items(Qt.Unchecked))
+        controls.addWidget(btn_select_all)
+        controls.addWidget(btn_clear)
+        controls.addStretch()
+        layout.addLayout(controls)
+
+        self.list_widget = QListWidget()
+        self.list_widget.setSelectionMode(QAbstractItemView.NoSelection)
+        layout.addWidget(self.list_widget, 1)
+
+        for row in code_rows:
+            item = QListWidgetItem(f"{'    ' * row['level']}{row['name']} ({row['freq']})")
+            item.setData(Qt.UserRole, row["name"])
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+            item.setCheckState(Qt.Checked)
+            self.list_widget.addItem(item)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _set_all_items(self, state):
+        for index in range(self.list_widget.count()):
+            self.list_widget.item(index).setCheckState(state)
+
+    def selected_code_names(self):
+        selected = []
+        for index in range(self.list_widget.count()):
+            item = self.list_widget.item(index)
+            if item.checkState() == Qt.Checked:
+                selected.append(item.data(Qt.UserRole))
+        return selected
 
 
 class ColorPickerDialog(QDialog):
