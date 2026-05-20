@@ -19,12 +19,12 @@ class CodeViewerWindow(QDialog):
     """
     IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tiff")
 
-    def __init__(self, document_path, codes, theme=None, dark_mode=False):
+    def __init__(self, document_path, codes_dict, theme=None, dark_mode=False):
         super().__init__()
         self.setWindowTitle("Visor de Códigos y Fragmentos")
         self.resize(900, 600)
         self.document_path = document_path
-        self.codes = codes
+        self.codes_dict = codes_dict or {}
         self.is_dark_mode = dark_mode
         self.theme = theme or get_theme(dark_mode)
 
@@ -160,13 +160,13 @@ class CodeViewerWindow(QDialog):
     def _assign_colors_to_codes(self):
         """Asigna un color basado en la configuración del código."""
         color_map = {}
-        for code in self.codes:
-            color_hex = code.get("color")
+        for code_name, data in self.codes_dict.items():
+            color_hex = data.get("hexcolor")
             if color_hex:
-                color_map[code["name"]] = QColor(color_hex)
+                color_map[code_name] = QColor(color_hex)
             else:
                 rgb = (random.randint(70, 190), random.randint(70, 190), random.randint(70, 190))
-                color_map[code["name"]] = QColor(*rgb)
+                color_map[code_name] = QColor(*rgb)
         return color_map
 
     # ------------------------------------------------------------------
@@ -175,61 +175,64 @@ class CodeViewerWindow(QDialog):
         self.code_list.clear()
         theme = self.theme
 
-        for code in self.codes:
-            fragments = code.get("fragments", [])
-            if not fragments:
-                continue
+        for code_name, data in self.codes_dict.items():
+            for doc_name_inner, frags in data.get("fragments", {}).items():
+                if not frags:
+                    continue
 
-            for frag in fragments:
-                preview_source = frag.get("comment") or frag.get("text") or ""
-                preview = preview_source.strip().replace("\n", " ")
-                if not preview and frag.get("type") == "image":
-                    rect = frag.get("rect") or {}
-                    if rect:
-                        preview = f"(Zona {rect.get('x', 0)},{rect.get('y', 0)} {rect.get('w', 0)}x{rect.get('h', 0)})"
-                    else:
-                        preview = "(Imagen)"
-                if len(preview) > 100:
-                    preview = preview[:100] + "..."
+                for frag in frags:
+                    preview_source = frag.get("comment") or frag.get("text") or ""
+                    preview = preview_source.strip().replace("\n", " ")
+                    if not preview and frag.get("type") == "image":
+                        rect = frag.get("rect") or {}
+                        if rect:
+                            preview = f"(Zona {rect.get('x', 0)},{rect.get('y', 0)} {rect.get('w', 0)}x{rect.get('h', 0)})"
+                        else:
+                            preview = "(Imagen)"
+                    if len(preview) > 100:
+                        preview = preview[:100] + "..."
 
-                # --- Datos base ---
-                code_name = code["name"]
-                doc_name = os.path.basename(frag.get("document", self.document_path))
+                    # --- Datos base ---
+                    doc_name = os.path.basename(doc_name_inner)
 
-                # --- Widget personalizado tipo fila ---
-                item_widget = QWidget()
-                row_layout = QHBoxLayout(item_widget)
-                row_layout.setContentsMargins(10, 0, 10, 0)
-                row_layout.setSpacing(15)
+                    # --- Widget personalizado tipo fila ---
+                    item_widget = QWidget()
+                    row_layout = QHBoxLayout(item_widget)
+                    row_layout.setContentsMargins(10, 0, 10, 0)
+                    row_layout.setSpacing(15)
 
-                # Documento
-                doc_label = QLabel(f"📄 {doc_name}")
-                doc_label.setFixedWidth(180)
-                doc_label.setStyleSheet(f"color: {theme['text_fg']}; font-weight: 500;")
-                doc_label.setToolTip(doc_name)
-                row_layout.addWidget(doc_label)
+                    # Documento
+                    doc_label = QLabel(f"📄 {doc_name}")
+                    doc_label.setFixedWidth(180)
+                    doc_label.setStyleSheet(f"color: {theme['text_fg']}; font-weight: 500;")
+                    doc_label.setToolTip(doc_name)
+                    row_layout.addWidget(doc_label)
 
-                # Código
-                code_label = QLabel(f"🏷️ {code_name}")
-                code_label.setFixedWidth(180)
-                code_label.setStyleSheet(f"color: {theme['text_fg']};")
-                code_label.setToolTip(code_name)
-                row_layout.addWidget(code_label)
+                    # Código
+                    code_label = QLabel(f"🏷️ {code_name}")
+                    code_label.setFixedWidth(180)
+                    code_label.setStyleSheet(f"color: {theme['text_fg']};")
+                    code_label.setToolTip(code_name)
+                    row_layout.addWidget(code_label)
 
-                # Fragmento
-                frag_label = QLabel(f"✂️ {preview}")
-                frag_label.setWordWrap(True)
-                frag_label.setStyleSheet(f"color: {theme['muted_text']};")
-                row_layout.addWidget(frag_label, stretch=1)
+                    # Fragmento
+                    frag_label = QLabel(f"✂️ {preview}")
+                    frag_label.setWordWrap(True)
+                    frag_label.setStyleSheet(f"color: {theme['muted_text']};")
+                    row_layout.addWidget(frag_label, stretch=1)
 
-                # Crear ítem en lista
-                item = QListWidgetItem()
-                hint = item_widget.sizeHint()
-                hint.setHeight(max(hint.height(), 60))
-                item.setSizeHint(hint)
-                item.setData(Qt.UserRole, (code, frag))
-                self.code_list.addItem(item)
-                self.code_list.setItemWidget(item, item_widget)
+                    # Crear ítem en lista
+                    item = QListWidgetItem()
+                    hint = item_widget.sizeHint()
+                    hint.setHeight(max(hint.height(), 60))
+                    item.setSizeHint(hint)
+                    
+                    code_payload = {"name": code_name}
+                    frag_payload = dict(frag)
+                    frag_payload["document"] = doc_name_inner
+                    item.setData(Qt.UserRole, (code_payload, frag_payload))
+                    self.code_list.addItem(item)
+                    self.code_list.setItemWidget(item, item_widget)
 
         self.filter_code_list_by_name(self.code_search_field.text())
 

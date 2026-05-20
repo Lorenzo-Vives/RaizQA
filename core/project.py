@@ -5,6 +5,7 @@ from docx import Document as DocxDocument
 from PyPDF2 import PdfReader
 
 from core.memos import MemoManager
+from core.pointer_manager import PointerManager
 
 
 class Project:
@@ -23,6 +24,12 @@ class Project:
         self.state_path = os.path.join(self.path, "project_data.json")
         self.project_path = self.path  # alias por compatibilidad
         self.memo_manager = MemoManager(self.path)
+        
+        # Nuevas Estructuras de Datos (EDDs)
+        self.codes_dict = {}
+        self.themes_dict = {}
+        self.texts_dict = {}
+        
         self._ensure_structure()
 
     # ------------------------------------------------------------------
@@ -50,16 +57,13 @@ class Project:
             data["themes"] = themes
         if case_studies is not None:
             data["case_studies"] = case_studies
-        os.makedirs(self.path, exist_ok=True)
-        with open(self.state_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+        
+        PointerManager.atomic_save(self.path, "project_data", data)
 
     def load_state(self):
         """Carga el estado guardado (si existe)."""
-        if not os.path.exists(self.state_path):
-            return {"codes": [], "documents": [], "highlights": {}}
-        with open(self.state_path, "r", encoding="utf-8") as f:
-            return json.load(f)
+        default_state = {"codes": [], "documents": [], "highlights": {}}
+        return PointerManager.atomic_load(self.path, "project_data", default=default_state)
 
     # ------------------------------------------------------------------
     # DIARIO DE CODIFICACIÓN
@@ -207,3 +211,123 @@ class Project:
             return []
         with open(codes_file, "r", encoding="utf-8") as f:
             return json.load(f)
+
+    # ==================================================================
+    # NUEVAS ESTRUCTURAS DE DATOS (EDDs) EN MEMORIA
+    # ==================================================================
+    
+    # --- TEXTOS EN MEMORIA ---
+    def load_all_texts_to_memory(self):
+        """Carga el texto de todos los documentos en self.texts_dict para lectura O(1)."""
+        for doc_name in self.list_documents():
+            self.get_document_text(doc_name)
+
+    def get_document_text(self, doc_name):
+        """Devuelve el texto del documento. Si no está en memoria, lo carga perezosamente."""
+        if doc_name not in self.texts_dict:
+            self.texts_dict[doc_name] = self.read_document(doc_name)
+        return self.texts_dict[doc_name]
+
+    # --- CRUD CÓDIGOS ---
+    def add_code(self, code_name, hexcolor="#5d9bd3", memo=""):
+        if code_name not in self.codes_dict:
+            self.codes_dict[code_name] = {
+                "hexcolor": hexcolor,
+                "memo": memo,
+                "fragments": {} # doc_name: [{"start": 0, "end": 10}, ...]
+            }
+
+    def delete_code(self, code_name):
+        if code_name in self.codes_dict:
+            del self.codes_dict[code_name]
+            # También lo sacamos de cualquier tema al que pertenezca
+            for theme in self.themes_dict.values():
+                if code_name in theme.get("codes", []):
+                    theme["codes"].remove(code_name)
+
+    def update_code(self, old_name, new_name=None, hexcolor=None, memo=None):
+        if old_name not in self.codes_dict:
+            return
+            
+        # Si se renombra el código, extraemos sus datos y cambiamos la llave
+        if new_name and new_name != old_name:
+            self.codes_dict[new_name] = self.codes_dict.pop(old_name)
+            target_name = new_name
+            # Actualizar en los temas
+            for theme in self.themes_dict.values():
+                if old_name in theme.get("codes", []):
+                    theme["codes"].remove(old_name)
+                    theme["codes"].append(new_name)
+        else:
+            target_name = old_name
+            
+        if hexcolor is not None:
+            self.codes_dict[target_name]["hexcolor"] = hexcolor
+        if memo is not None:
+            self.codes_dict[target_name]["memo"] = memo
+
+    def add_fragment(self, code_name, doc_name, fragment_data):
+        """Añade los datos de un fragmento (texto o imagen) a un código específico."""
+        self.add_code(code_name) # Asegurar que el código exista
+        fragments_doc = self.codes_dict[code_name]["fragments"].setdefault(doc_name, [])
+        fragments_doc.append(fragment_data)
+
+    def get_fragments_for_code(self, code_name):
+        """
+        Recupera el texto real de forma instantánea (O(1)) para todos los fragmentos
+        asociados a un código utilizando el texto pre-cargado.
+        """
+        if code_name not in self.codes_dict:
+            return []
+            
+        results = []
+        for doc_name, fragments in self.codes_dict[code_name]["fragments"].items():
+            full_text = self.get_document_text(doc_name)
+            for frag in fragments:
+                start, end = frag["start"], frag["end"]
+                text_snippet = full_text[start:end]
+                results.append({
+                    "doc": doc_name,
+                    "start": start,
+                    "end": end,
+                    "text": text_snippet
+                })
+        return results
+
+    # --- CRUD TEMAS ---
+    def add_theme(self, theme_name, memo=""):
+        if theme_name not in self.themes_dict:
+            self.themes_dict[theme_name] = {
+                "memo": memo,
+                "codes": []
+            }
+
+    def delete_theme(self, theme_name):
+        if theme_name in self.themes_dict:
+            del self.themes_dict[theme_name]
+
+    def add_code_to_theme(self, theme_name, code_name):
+        self.add_theme(theme_name)
+        if code_name not in self.themes_dict[theme_name]["codes"]:
+            self.themes_dict[theme_name]["codes"].append(code_name)
+            
+    def remove_code_from_theme(self, theme_name, code_name):
+        if theme_name in self.themes_dict:
+            if code_name in self.themes_dict[theme_name]["codes"]:
+                self.themes_dict[theme_name]["codes"].remove(code_name)
+
+    # --- PERSISTENCIA DE EDDS ---
+    def save_edds(self):
+        """Persiste solo las EDDs a disco de forma atómica y pura."""
+        data = {
+            "codes_dict": self.codes_dict,
+            "themes_dict": self.themes_dict
+        }
+        PointerManager.atomic_save(self.path, "edds_data", data)
+            
+    def load_edds(self):
+        """Carga las EDDs desde disco si existen."""
+        data = PointerManager.atomic_load(self.path, "edds_data", default={})
+        self.codes_dict = data.get("codes_dict", {})
+        self.themes_dict = data.get("themes_dict", {})
+

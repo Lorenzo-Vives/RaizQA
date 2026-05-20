@@ -16,12 +16,12 @@ from PySide6.QtCore import Qt
 class CompareDialog(QDialog):
     """Visor lado a lado para comparar dos documentos y navegar coincidencias de códigos."""
 
-    def __init__(self, project, codes, left_doc=None, right_doc=None, parent=None):
+    def __init__(self, project, codes_dict, left_doc=None, right_doc=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Comparar documentos")
         self.resize(1100, 650)
         self.project = project
-        self.codes = codes or []
+        self.codes_dict = codes_dict or {}
         self.doc_left = left_doc
         self.doc_right = right_doc
         self.matches = []
@@ -94,7 +94,7 @@ class CompareDialog(QDialog):
             self.cbo_right.setCurrentIndex(1)
 
     def _populate_code_filter(self):
-        codes = sorted({c.get("name", "") for c in self.codes if c.get("name")})
+        codes = sorted(self.codes_dict.keys())
         self.cbo_code.clear()
         self.cbo_code.addItem("(Todos)", "")
         for name in codes:
@@ -124,13 +124,13 @@ class CompareDialog(QDialog):
 
     def _fragments_for_doc(self, doc_name):
         frags = []
-        for code in self.codes:
-            for frag in code.get("fragments", []):
-                if frag.get("document") == doc_name:
-                    if not frag.get("color"):
-                        frag["color"] = code.get("color", "#fff59d")
-                    frag["_code_name"] = code.get("name")
-                    frags.append(frag)
+        for code_name, data in self.codes_dict.items():
+            for frag in data.get("fragments", {}).get(doc_name, []):
+                f_copy = dict(frag)
+                f_copy["color"] = data.get("hexcolor", "#fff59d")
+                f_copy["_code_name"] = code_name
+                f_copy["document"] = doc_name
+                frags.append(f_copy)
         return frags
 
     def _apply_fragments(self, view, fragments):

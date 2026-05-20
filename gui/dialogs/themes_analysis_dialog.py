@@ -15,11 +15,11 @@ from code_viewer.code_viewer import CodeViewerWindow
 
 
 class ThemesAnalysisDialog(QDialog):
-    def __init__(self, codes, themes, project, parent=None):
+    def __init__(self, codes_dict, themes, project, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Analisis de temas")
         self.resize(720, 420)
-        self.codes = codes or []
+        self.codes_dict = codes_dict or {}
         self.themes = themes or []
         self.project = project
         self._build_ui()
@@ -52,20 +52,22 @@ class ThemesAnalysisDialog(QDialog):
 
     def _code_stats(self):
         stats = {}
-        for code in self.codes:
-            name = code.get("name")
-            if not name:
-                continue
-            stats[name] = int(code.get("count", 0))
+        for code_name, data in self.codes_dict.items():
+            stats[code_name] = sum(len(frags) for frags in data.get("fragments", {}).values())
         return stats
 
     def _code_fragments(self):
         frags = {}
-        for code in self.codes:
-            name = code.get("name")
-            if not name:
-                continue
-            frags[name] = code.get("fragments", []) or []
+        for code_name, data in self.codes_dict.items():
+            flat_frags = []
+            for doc, doc_frags in data.get("fragments", {}).items():
+                for f in doc_frags:
+                    f_copy = dict(f)
+                    f_copy["document"] = doc
+                    f_copy["color"] = data.get("hexcolor", "#fff59d")
+                    f_copy["type"] = "text"
+                    flat_frags.append(f_copy)
+            frags[code_name] = flat_frags
         return frags
 
     def _load_data(self):
@@ -126,7 +128,7 @@ class ThemesAnalysisDialog(QDialog):
         dark_mode = getattr(parent, "is_dark_mode", False)
         viewer = CodeViewerWindow(
             doc_path,
-            self.codes,
+            self.codes_dict,
             theme=theme,
             dark_mode=dark_mode,
         )

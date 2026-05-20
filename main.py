@@ -3,7 +3,40 @@ import os
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QIcon
 from gui.main_window import RaizQAGUI
+from core.logica import ControladorLogico
 from gui.dialogs.readme_dialog import ReadmeDialog
+
+
+class RaizQA:
+    def __init__(self):
+        self.logica = ControladorLogico()
+        self.ventana = RaizQAGUI()
+        self.conectar()
+    
+    def conectar(self):
+        # 1. UI -> Backend (La ventana emite peticiones, la lógica las atrapa)
+        self.ventana.signal_req_global_search.connect(self.logica.req_global_search)
+        self.ventana.signal_req_export_diary.connect(self.logica.req_export_diary)
+        self.ventana.signal_req_export_code_tree.connect(self.logica.req_export_code_tree)
+        self.ventana.signal_req_export_code_fragments.connect(self.logica.req_export_code_fragments)
+        
+        # UI -> Backend (Gestión de Códigos y EDDs)
+        self.ventana.signal_req_add_code.connect(self.logica.req_add_code)
+        self.ventana.signal_req_delete_code.connect(self.logica.req_delete_code)
+        self.ventana.signal_req_update_code.connect(self.logica.req_update_code)
+        self.ventana.signal_req_add_fragment.connect(self.logica.req_add_fragment)
+        
+        self.ventana.signal_req_set_project.connect(self.logica.req_set_project)
+
+        # 2. Backend -> UI (La lógica emite resultados, la ventana los muestra)
+        self.logica.edds_updated.connect(self.ventana.handle_edds_updated)
+        self.logica.error_occurred.connect(self.ventana.handle_error)
+        
+        self.logica.search_completed.connect(self.ventana.handle_search_completed)
+        self.logica.search_failed.connect(self.ventana.handle_search_failed)
+        
+        self.logica.export_success.connect(self.ventana.handle_export_success)
+        self.logica.export_error.connect(self.ventana.handle_export_error)
 
 # Asegura que el directorio raíz esté en sys.path (por si se ejecuta desde fuera)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -22,10 +55,11 @@ if __name__ == "__main__":
     readme = ReadmeDialog()
     readme.exec()
 
-    # Ventana principal
-    window = RaizQAGUI()
+    # Inicializar arquitectura MVC
+    app_controller = RaizQA()
     if os.path.exists(icon_path):
-        window.setWindowIcon(QIcon(icon_path))
-    window.show()
+        app_controller.ventana.setWindowIcon(QIcon(icon_path))
+    
+    app_controller.ventana.show()
 
     sys.exit(app.exec())

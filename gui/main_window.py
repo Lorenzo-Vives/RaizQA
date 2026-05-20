@@ -7,10 +7,12 @@ from PySide6.QtWidgets import (
     QGridLayout, QDialogButtonBox, QFileIconProvider, QAbstractItemView, QTextEdit,
     QStackedWidget
 )
-from PySide6.QtGui import QAction, QColor, QTextCursor, QTextCharFormat, QPainter, QPixmap, QIcon, QPalette
-from PySide6.QtCore import Qt, QTimer, QPoint, QEvent
+from PySide6.QtGui import (QAction, QColor, QTextCursor, QTextCharFormat, QPainter, QPixmap, QIcon, QPalette,
+                           QShortcut, QKeySequence)
+from PySide6.QtCore import Qt, QTimer, QPoint, QEvent, Signal
 from docx import Document
 
+from gui.widgets.local_search import LocalSearchWidget
 from gui.dialogs.memo_dialog import MemoDialog
 from gui.dialogs.fragments_dialog import CodeFragmentsDialog
 from gui.dialogs.diary_dialog import DiaryDialog
@@ -28,6 +30,21 @@ from core.project import Project
 from gui.theme import get_theme
 
 class RaizQAGUI(QMainWindow):
+    # ==========================================
+    # SEÑALES DE LA UI AL BACKEND
+    # ==========================================
+    signal_req_global_search = Signal(str, object, list, object)
+    signal_req_export_diary = Signal(str, str, str)
+    signal_req_export_code_tree = Signal(list, str)
+    signal_req_export_code_fragments = Signal(list, list, str)
+    signal_req_set_project = Signal(object)
+
+    # SEÑALES CRUD EDDs
+    signal_req_add_code = Signal(str, str, str)
+    signal_req_delete_code = Signal(str)
+    signal_req_update_code = Signal(str, str, str, str)
+    signal_req_add_fragment = Signal(str, str, object)
+    
     AUTO_SAVE_INTERVAL = 30000
     COLOR_PALETTE = [
         ("Amarillo", "#ffcc00"),
@@ -52,11 +69,16 @@ class RaizQAGUI(QMainWindow):
         self.memo_manager = None
         self.working_dir = None
         self.current_doc = None
-        self.codes = []
+        
+        # Cachés locales de las EDDs para que los diálogos los lean rápido
+        self.codes_dict = {}
+        self.themes_dict = {}
+        
         self.code_themes = []
         self.case_studies = []
         self.highlights = {}        # todos los subrayados por documento
         self.highlighted = []       # subrayados del documento actual
+
         self._color_index = 0
         self.doc_groups = {"__root__": []}
         self.is_dark_mode = False
@@ -417,6 +439,21 @@ class RaizQAGUI(QMainWindow):
         text_layout.addWidget(self.viewer_stack, 1)
         content_layout.addWidget(text_card, 62)
 
+        # -------------------- BUSCADOR LOCAL MODULAR (CTRL+F) --------------------
+        self.local_search_widget = LocalSearchWidget(self.text_area, parent=self)
+        self.local_search_widget.setVisible(False)
+        text_layout.addWidget(self.local_search_widget)
+        
+        # Conectar las señales
+        self.local_search_widget.selections_updated.connect(self._update_all_extra_selections)
+        self.local_search_widget.closed.connect(lambda: self.text_area.setFocus())
+        
+        self._ls_extra_selections = [] # Guardará las selecciones del buscador
+
+        # Atajo de teclado nativo (Cmd+F o Ctrl+F)
+        self.shortcut_find = QShortcut(QKeySequence.Find, self)
+        self.shortcut_find.activated.connect(self._invoke_local_search)
+
         content_wrapper_layout.addWidget(content_frame, 1)
 
         resize_row = QHBoxLayout()
@@ -534,40 +571,14 @@ class RaizQAGUI(QMainWindow):
         self._search_matches = []
         self._search_index = -1
 
-        term_lower = term.lower()
-        doc_matches = []
-        code_matches = []
-        memo_matches = []
+        # Emitimos señal para que el Backend trabaje
+        self.signal_req_global_search.emit(term, self.current_project, self.codes_dict, self.memo_manager)
 
-        # Buscar en documentos
-        for doc_name in self._all_documents():
-            if self._is_image_document(doc_name):
-                continue
-            try:
-                text = self.current_project.read_document(doc_name)
-            except Exception:
-                continue
-            if term_lower in text.lower():
-                doc_matches.append(doc_name)
-                # recopilar ocurrencias con posiciones
-                text_lower = text.lower()
-                start = 0
-                while True:
-                    idx = text_lower.find(term_lower, start)
-                    if idx == -1:
-                        break
-                    self._search_matches.append({"doc": doc_name, "start": idx, "length": len(term)})
-                    start = idx + len(term)
-
-        # Buscar en códigos y memos
-        for code in self.codes:
-            if term_lower in code["name"].lower():
-                code_matches.append(code["name"])
-        if self.memo_manager:
-            for code_name, memo_text in self.memo_manager.memos.items():
-                if term_lower in code_name.lower() or term_lower in (memo_text or "").lower():
-                    if code_name not in memo_matches:
-                        memo_matches.append(code_name)
+    def handle_search_completed(self, results):
+        self._search_matches = results.get("search_matches", [])
+        doc_matches = results.get("doc_matches", [])
+        code_matches = results.get("code_matches", [])
+        memo_matches = results.get("memo_matches", [])
 
         # Seleccionar primeras coincidencias
         if doc_matches:
@@ -586,11 +597,84 @@ class RaizQAGUI(QMainWindow):
         if memo_matches:
             summary.append(f"Memos: {', '.join(memo_matches[:5])}" + ("..." if len(memo_matches) > 5 else ""))
 
-        if not summary:
-            QMessageBox.information(self, "Buscar", "Sin coincidencias en documentos, códigos o memos.")
-        else:
+        if summary:
             QMessageBox.information(self, "Buscar", "\n".join(summary))
         self._update_search_label()
+
+    def handle_search_failed(self, message):
+        QMessageBox.information(self, "Buscar", message)
+
+    def handle_edds_updated(self, codes_dict, themes_dict):
+        """El Backend nos avisa que las EDDs cambiaron. Actualizamos cachés y repintamos la UI."""
+        print(f"DEBUG: edds_updated received. codes_dict keys: {list(codes_dict.keys())}")
+        for k, v in codes_dict.items():
+            print(f"DEBUG: code {k} -> {v}")
+        self.codes_dict = codes_dict
+        self.themes_dict = themes_dict
+        self.populate_code_tree() # Repinta el árbol con el nuevo diccionario
+
+    def populate_code_tree(self):
+        """Reconstruye el árbol de códigos aplicando temas/categorías jerárquicamente."""
+        if not hasattr(self, "code_tree"): return
+        
+        self._code_tree_updating = True
+        self.code_tree.clear()
+
+        # Registro para saber qué códigos ya están dentro de una carpeta
+        added_codes = set()
+
+        # 1. Crear los nodos padre (Carpetas de Temas)
+        for theme in getattr(self, "code_themes", []):
+            theme_name = theme.get("name", "Tema sin nombre")
+            theme_codes = theme.get("codes", [])
+            
+            # Crear el ítem de la carpeta/tema
+            theme_item = QTreeWidgetItem([theme_name, "", ""])
+            theme_item.setData(0, Qt.UserRole, "theme")  # Marcador para diferenciarlo
+            
+            # Le asignamos un icono de carpeta nativo del sistema
+            theme_item.setIcon(0, self.icon_provider.icon(QFileIconProvider.Folder))
+            
+            self.code_tree.addTopLevelItem(theme_item)
+
+            # 2. Añadir los códigos como hijos de esta carpeta
+            for code_name in theme_codes:
+                if code_name in self.codes_dict:
+                    code_item = self._create_code_node(code_name, self.codes_dict[code_name])
+                    theme_item.addChild(code_item)
+                    added_codes.add(code_name)
+
+        # 3. Añadir los códigos "huérfanos" (que no pertenecen a ningún tema) en la raíz
+        for code_name, code_data in self.codes_dict.items():
+            if code_name not in added_codes:
+                code_item = self._create_code_node(code_name, code_data)
+                self.code_tree.addTopLevelItem(code_item)
+                
+        if getattr(self, "_codes_expanded", False):
+            self.code_tree.expandAll()
+            
+        if hasattr(self, "code_search_field"):
+            self.filter_codes(self.code_search_field.text())
+            
+        self._code_tree_updating = False
+
+    def _create_code_node(self, code_name, code_data):
+        """Método auxiliar para instanciar un nodo visual de código."""
+        count = sum(len(frags) for frags in code_data.get("fragments", {}).values())
+        code_item = QTreeWidgetItem([code_name, str(count), ""])
+        code_item.setData(0, Qt.UserRole + 1, code_name)
+        code_item.setData(0, Qt.UserRole, "code")
+        
+        self._configure_code_item(code_item)
+        self.apply_code_item_color(code_item, code_data.get("hexcolor", "#fff59d"))
+        
+        if code_data.get("memo"):
+            code_item.setText(2, "📝")
+            
+        return code_item
+
+    def handle_error(self, message):
+        QMessageBox.critical(self, "Error del Backend", message)
 
     def _go_to_match(self, match):
         if not match:
@@ -876,6 +960,9 @@ class RaizQAGUI(QMainWindow):
 
         self.lbl_project.setStyleSheet(f"color: {theme['text_fg']}; font-weight: 700;")
 
+        if hasattr(self, "local_search_widget"):
+            self.local_search_widget.update_theme(self._current_theme(), self.is_dark_mode)
+
         self._refresh_code_tree_colors()
         self.restore_highlights()
         self._apply_column_selection_style()
@@ -891,6 +978,7 @@ class RaizQAGUI(QMainWindow):
         add_code_action = menu.addAction("Agregar código")
         rename_action = None
         view_fragments_action = None
+        delete_code_action = None
         view_memo_action = None
         add_memo_action = None
         delete_memo_action = None
@@ -899,6 +987,7 @@ class RaizQAGUI(QMainWindow):
             menu.addSeparator()
             rename_action = menu.addAction("Renombrar codigo")
             view_fragments_action = menu.addAction("Ver fragmentos")
+            delete_code_action = menu.addAction("🗑️ Eliminar código")
             menu.addSeparator()
 
             view_memo_action = menu.addAction("👁️ Ver memo")
@@ -910,6 +999,10 @@ class RaizQAGUI(QMainWindow):
             self.prompt_add_code(parent_item=item)
         elif action == rename_action:
             self._start_code_rename(item)
+        elif action == delete_code_action:
+            reply = QMessageBox.question(self, "Eliminar código", f"¿Seguro que deseas eliminar '{code_name}' y todos sus fragmentos?", QMessageBox.Yes | QMessageBox.No)
+            if reply == QMessageBox.Yes:
+                self.signal_req_delete_code.emit(code_name)
         elif action == view_fragments_action:
             self.show_code_fragments(item, 1)
         elif action == view_memo_action:
@@ -986,7 +1079,6 @@ class RaizQAGUI(QMainWindow):
             self._show_text_viewer()
 
         self.highlights.pop(doc_name, None)
-        self._remove_fragments_for_document(doc_name)
 
         self._rebuild_doc_groups_from_tree()
         self.save_project()
@@ -1014,11 +1106,47 @@ class RaizQAGUI(QMainWindow):
                 QMessageBox.critical(self, "Diario", f"No se pudo guardar el diario:\n{exc}")
 
     # -------------------- FUNCIONES NUEVAS --------------------
+    def _invoke_local_search(self):
+        """Despliega el buscador si estamos viendo un documento de texto."""
+        if self.viewer_stack.currentWidget() == self.text_area and self.current_doc:
+            # Sincronizamos el tema antes de mostrarlo
+            self.local_search_widget.update_theme(self._current_theme(), self.is_dark_mode)
+            self.local_search_widget.show_search()
+
+    def _update_all_extra_selections(self, search_selections=None):
+        """
+        Unifica los resaltados: Este método evita que el resaltado de la búsqueda 
+        borre el resaltado de la selección de columnas y viceversa.
+        """
+        if search_selections is not None:
+            self._ls_extra_selections = search_selections
+            
+        # Combinamos las selecciones habituales con las selecciones de la búsqueda
+        todas_las_selecciones = self._prev_extra_selections + self._column_extra_selections + self._ls_extra_selections
+        self.text_area.setExtraSelections(todas_las_selecciones)
+
     def show_code_fragments(self, item, column):
         code_name = self._code_item_name(item)
-        code = next((c for c in self.codes if c["name"] == code_name), None)
+        code = self.get_code_data(code_name)
         if code and "fragments" in code:
-            dialog = CodeFragmentsDialog(code_name, code["fragments"])
+            flat_frags = []
+            for doc, frags in code["fragments"].items():
+                # Leer el documento 
+                doc_text = self.current_project.get_document_text(doc) if self.current_project else ""
+                
+                for f in frags:
+                    f_copy = dict(f)
+                    f_copy["document"] = doc
+                    f_copy["type"] = f.get("type", "text")
+                    
+                    # INYECTAR EL TEXTO AQUÍ
+                    if "text" not in f_copy:
+                        start, end = f_copy.get("start", 0), f_copy.get("end", 0)
+                        f_copy["text"] = doc_text[start:end]
+                        
+                    flat_frags.append(f_copy)
+                    
+            dialog = CodeFragmentsDialog(code_name, flat_frags)
             dialog.exec()
 
     def _on_code_tree_item_clicked(self, item, column):
@@ -1063,12 +1191,13 @@ class RaizQAGUI(QMainWindow):
             QMessageBox.warning(self, "Renombrar codigo", "El nombre del codigo no puede quedar vacio.")
             return
 
-        if self._code_name_exists(new_name, exclude_item=item):
+        if new_name in self.codes_dict:
             self._restore_code_item_label(item)
             QMessageBox.warning(self, "Renombrar codigo", "Ya existe un codigo con ese nombre.")
             return
 
-        self._rename_code(old_name, new_name, item)
+        self._restore_code_item_label(item)
+        self.signal_req_update_code.emit(old_name, new_name, None, None)
 
     # -------------------- FUNCIONES BÁSICAS --------------------
     def select_working_dir(self):
@@ -1087,6 +1216,7 @@ class RaizQAGUI(QMainWindow):
             self.memo_manager = self.current_project.memo_manager
             self.reset_project_state()
             self.lbl_project.setText(f"Proyecto: {name}")
+            self.signal_req_set_project.emit(self.current_project)
             QMessageBox.information(self, "Proyecto creado", f"Proyecto '{name}' creado exitosamente.")
             self.save_project()
 
@@ -1104,12 +1234,14 @@ class RaizQAGUI(QMainWindow):
             self.memo_manager = self.current_project.memo_manager
             self.lbl_project.setText(f"Proyecto: {self.current_project.name}")
             self.reset_project_state()
+            self.signal_req_set_project.emit(self.current_project)
             self.load_project()
             QMessageBox.information(self, "Proyecto abierto", f"Proyecto '{self.current_project.name}' abierto.")
 
     def reset_project_state(self):
         """Reinicia colecciones y widgets al cambiar de proyecto."""
-        self.codes = []
+        self.codes_dict = {}
+        self.themes_dict = {}
         self.code_themes = []
         self.case_studies = []
         self.highlights = {}
@@ -1131,9 +1263,8 @@ class RaizQAGUI(QMainWindow):
         if not self.current_project:
             return
         self._rebuild_doc_groups_from_tree()
-        self._rebuild_codes_from_tree()
         documents = self._all_documents()
-        self.current_project.save_state(self.codes, documents, self.highlights, self.doc_groups, self.code_themes, self.case_studies)
+        self.current_project.save_state([], documents, self.highlights, self.doc_groups, self.code_themes, self.case_studies)
 
     def save_project_as(self):
         if not self.current_project:
@@ -1202,14 +1333,14 @@ class RaizQAGUI(QMainWindow):
         if not path:
             return
 
-        try:
-            doc = Document()
-            doc.add_heading(f"Diario de codificación - {self.current_project.name}", level=1)
-            doc.add_paragraph(diary_text if diary_text.strip() else "(Diario vacío)")
-            doc.save(path)
-            QMessageBox.information(self, "Exportar diario", f"Diario exportado en:\n{path}")
-        except Exception as exc:
-            QMessageBox.critical(self, "Exportar diario", f"No se pudo exportar el diario:\n{exc}")
+        # Emitir señal al Backend
+        self.signal_req_export_diary.emit(diary_text, self.current_project.name, path)
+
+    def handle_export_success(self, export_type, path):
+        QMessageBox.information(self, f"Exportar {export_type}", f"{export_type} exportado exitosamente en:\n{path}")
+
+    def handle_export_error(self, export_type, error_msg):
+        QMessageBox.critical(self, f"Exportar {export_type}", f"No se pudo exportar {export_type}:\n{error_msg}")
 
 
     def auto_save(self):
@@ -1221,47 +1352,42 @@ class RaizQAGUI(QMainWindow):
 
         data = self.current_project.load_state()
 
-        self.codes = data.get("codes", [])
         self.code_themes = data.get("themes", [])
         self.case_studies = data.get("case_studies", [])
         self.highlights = data.get("highlights", {})
-        self.ensure_code_colors()
 
+        # ---------------------------------------------------------
+        # SOLUCIÓN: Cargar las EDDs del backend PRIMERO 
+        # ---------------------------------------------------------
+        self.current_project.load_edds()
+        self.codes_dict = self.current_project.codes_dict
+        self.themes_dict = self.current_project.themes_dict
+
+        # Ahora que los diccionarios tienen datos, limpiamos los árboles
         self.code_tree.clear()
         self.doc_tree.clear()
+        
         self.doc_groups = data.get("doc_groups")
         if not self.doc_groups:
             documents = data.get("documents") or self.current_project.list_documents()
             self.doc_groups = {"__root__": documents}
+            
+        # Al ejecutar esto, display_document() se llamará para el primer archivo
+        # y ya podrá leer correctamente los fragmentos desde self.codes_dict
         self._populate_doc_tree()
 
-        for c in self.codes:
-            parent_item = self.find_tree_item(c.get("parent")) if c.get("parent") else None
-            code_item = QTreeWidgetItem([c["name"], str(c.get("count", 0)), ""])
-            code_item.setData(0, Qt.UserRole + 1, c["name"])
-            self._configure_code_item(code_item)
-            if parent_item:
-                parent_item.addChild(code_item)
-            else:
-                self.code_tree.addTopLevelItem(code_item)
-            self.apply_code_item_color(code_item, c.get("color", "#fff59d"))
-
-        # Sincronizar jerarquía de padres con el árbol actual (por si hubo drag & drop previo)
-        self._rebuild_codes_from_tree()
+        # Poblar el árbol de códigos visualmente
+        self.populate_code_tree()
 
         if self.memo_manager:
             for code_name, memo_text in self.memo_manager.memos.items():
                 if memo_text.strip():
                     self.update_memo_icon(code_name, True)
 
-        self._color_index = max(self._color_index, len(self.codes))
+        self._color_index = max(self._color_index, len(self.codes_dict))
         if hasattr(self, "code_search_field"):
             self.filter_codes(self.code_search_field.text())
 
-    def ensure_code_colors(self):
-        for code in self.codes:
-            if not code.get("color"):
-                code["color"] = self.next_palette_color()
 
     def filter_codes(self, text):
         """Filtra el árbol de códigos por nombre."""
@@ -1316,18 +1442,6 @@ class RaizQAGUI(QMainWindow):
 
     def _show_image_viewer(self):
         self.viewer_stack.setCurrentWidget(self.image_viewer)
-
-    def _current_image_fragments(self):
-        if not self.current_doc:
-            return []
-        fragments = []
-        for code in self.codes:
-            for frag in code.get("fragments", []):
-                if frag.get("document") == self.current_doc and frag.get("type") == "image":
-                    if not frag.get("color"):
-                        frag["color"] = code.get("color", "#fff59d")
-                    fragments.append(frag)
-        return fragments
 
     def _image_selection_payload(self):
         rect = self.image_viewer.get_selection_rect()
@@ -1419,19 +1533,7 @@ class RaizQAGUI(QMainWindow):
         return "__root__"
 
     def _rebuild_codes_from_tree(self):
-        for idx in range(self.code_tree.topLevelItemCount()):
-            self._update_code_parent_recursive(self.code_tree.topLevelItem(idx), None)
-        self.filter_codes(self.code_search_field.text() if hasattr(self, "code_search_field") else "")
-
-    def _update_code_parent_recursive(self, item, parent_name):
-        if not item:
-            return
-        code_name = self._code_item_name(item)
-        code_data = self.get_code_data(code_name)
-        if code_data:
-            code_data["parent"] = parent_name
-        for i in range(item.childCount()):
-            self._update_code_parent_recursive(item.child(i), code_name)
+        pass
 
     def _configure_code_item(self, item):
         flags = item.flags()
@@ -1450,15 +1552,6 @@ class RaizQAGUI(QMainWindow):
             return stored
         return item.text(0).strip()
 
-    def _code_name_exists(self, name, exclude_item=None):
-        iterator = QTreeWidgetItemIterator(self.code_tree)
-        while iterator.value():
-            item = iterator.value()
-            if item is not exclude_item and self._code_item_name(item) == name:
-                return True
-            iterator += 1
-        return any(code.get("name") == name for code in self.codes if not self.find_tree_item(code.get("name")))
-
     def _restore_code_item_label(self, item):
         if not item:
             return
@@ -1466,38 +1559,10 @@ class RaizQAGUI(QMainWindow):
         code_data = self.get_code_data(code_name)
         self._code_tree_updating = True
         if code_data:
-            self.apply_code_item_color(item, code_data.get("color", "#fff59d"))
+            self.apply_code_item_color(item, code_data.get("hexcolor", "#fff59d"))
         else:
             item.setText(0, code_name)
         self._code_tree_updating = False
-
-    def _rename_code(self, old_name, new_name, item):
-        code_data = self.get_code_data(old_name)
-        if not code_data:
-            self._restore_code_item_label(item)
-            return
-
-        code_data["name"] = new_name
-        for code in self.codes:
-            if code.get("parent") == old_name:
-                code["parent"] = new_name
-
-        self._rename_code_in_themes(old_name, new_name)
-        if self.memo_manager and hasattr(self.memo_manager, "rename_memo"):
-            self.memo_manager.rename_memo(old_name, new_name)
-
-        self._code_tree_updating = True
-        item.setData(0, Qt.UserRole + 1, new_name)
-        self.apply_code_item_color(item, code_data.get("color", "#fff59d"))
-        self._code_tree_updating = False
-
-        self._rebuild_codes_from_tree()
-        self.save_project()
-
-    def _rename_code_in_themes(self, old_name, new_name):
-        for theme in self.code_themes:
-            codes = theme.get("codes") or []
-            theme["codes"] = [new_name if code == old_name else code for code in codes]
 
     # -------------------- SELECCIÓN COLUMNAR EN TEXTO --------------------
     def eventFilter(self, obj, event):
@@ -1619,15 +1684,15 @@ class RaizQAGUI(QMainWindow):
             "width": width,
         }
         self._column_extra_selections = selections
-        self.text_area.setExtraSelections(self._prev_extra_selections + selections)
+        self._update_all_extra_selections()
 
     def _clear_column_selection(self):
         if self._column_selecting:
             self._column_selecting = False
         if self._prev_extra_selections:
-            self.text_area.setExtraSelections(self._prev_extra_selections)
+            self._update_all_extra_selections()
         else:
-            self.text_area.setExtraSelections([])
+            self._update_all_extra_selections()
         self._column_extra_selections = []
         self._column_selection_info = None
         self._prev_extra_selections = []
@@ -1760,11 +1825,16 @@ class RaizQAGUI(QMainWindow):
             self.text_area.clear()
             self.image_viewer.clear_image()
 
-        #  3. Restaurar los subrayados del documento nuevo
-        self.highlighted = self.highlights.get(self.current_doc, []).copy()
-        for frag in self.highlighted:
-            if not frag.get("color"):
-                frag["color"] = self._get_code_color(frag)
+        #  3. Restaurar los subrayados del documento nuevo DIRECTAMENTE desde codes_dict
+        self.highlighted = []
+        for code_name, data in self.codes_dict.items():
+            for frag in data.get("fragments", {}).get(self.current_doc, []):
+                f_copy = dict(frag)
+                f_copy["color"] = data.get("hexcolor", "#fff59d")
+                f_copy["document"] = self.current_doc
+                f_copy["type"] = frag.get("type", "text")
+                self.highlighted.append(f_copy)
+
         self.restore_highlights()
 
     def _show_image_document(self, doc_path):
@@ -1851,48 +1921,6 @@ class RaizQAGUI(QMainWindow):
                 docs.remove(name)
                 break
 
-    def _remove_fragments_for_document(self, doc_name):
-        """Elimina los fragmentos asociados a un documento y actualiza conteos."""
-        for code in self.codes:
-            frags = code.get("fragments", [])
-            frags = [f for f in frags if f.get("document") != doc_name]
-            code["fragments"] = frags
-            code["count"] = len(frags)
-            self.update_code_count(code["name"], code["count"])
-
-
-    # -------------------- FUNCIONES DE DOCUMENTO --------------------
-    def open_document(self, file_path):
-        if not self.current_project:
-            return
-
-        # Guardar subrayados del documento actual
-        if self.current_doc:
-            self.save_current_highlights()
-    
-        self._clear_column_selection()
-        self.current_doc = os.path.basename(file_path)
-        if self.current_project:
-            doc_path = self.current_project.get_document_path(self.current_doc)
-            if self._is_image_document(self.current_doc):
-                self._show_image_document(doc_path)
-            else:
-                self._show_text_viewer()
-                text = self.current_project.read_document(self.current_doc)
-                self.text_area.setPlainText(text)
-    
-        #  Cargar solo los fragmentos del documento actual
-        self.highlighted = []
-        for c in self.codes:
-            for frag in c.get("fragments", []):
-                if frag.get("document") == self.current_doc:
-                    if not frag.get("color"):
-                        frag["color"] = c.get("color", "#fff59d")
-                    self.highlighted.append(frag)
-                
-        self.restore_highlights()
-
-
     # -------------------- CÓDIGOS --------------------
     def text_context_menu(self, pos):
         if self._is_current_doc_image():
@@ -1913,12 +1941,12 @@ class RaizQAGUI(QMainWindow):
             create_subcode_action = menu.addAction("➔ Crear subcódigo")
             create_live_code_action = menu.addAction("Codificar in vivo")
 
-            if self.codes:
+            if self.codes_dict:
                 add_to_existing = menu.addMenu("📎 Agregar a código existente")
-                for c in self.codes:
-                    act = add_to_existing.addAction(c["name"])
+                for code_name in self.codes_dict:
+                    act = add_to_existing.addAction(code_name)
                     act.triggered.connect(
-                        lambda checked=False, name=c["name"], text=selected_text,
+                        lambda checked=False, name=code_name, text=selected_text,
                         start=selection_start, end=selection_end:
                         self.add_to_existing_code(name, text, start, end)
                     )
@@ -1950,10 +1978,9 @@ class RaizQAGUI(QMainWindow):
         menu = QMenu()
         create_code_action = menu.addAction("Crear nuevo codigo para zona" if has_selection else "Crear nuevo codigo para imagen")
         create_subcode_action = menu.addAction("Crear subcodigo para zona" if has_selection else "Crear subcodigo para imagen")
-        if self.codes:
+        if self.codes_dict:
             add_to_existing = menu.addMenu("Agregar a codigo existente")
-            for c in self.codes:
-                code_name = c["name"]
+            for code_name in self.codes_dict:
                 act = add_to_existing.addAction(code_name)
                 act.triggered.connect(lambda checked=False, name=code_name: self.add_image_to_existing(name))
 
@@ -2041,9 +2068,9 @@ class RaizQAGUI(QMainWindow):
             QMessageBox.warning(self, "Agregar codigo", "Primero abre o crea un proyecto.")
             return
 
-        parent_name = self._code_item_name(parent_item) if parent_item else None
-        prompt_title = "Agregar subcodigo" if parent_name else "Agregar codigo"
-        prompt_label = f"Nombre del codigo hijo de '{parent_name}':" if parent_name else "Nombre del codigo:"
+        # Backend maneja todos los códigos planos ahora mismo por simpleza
+        prompt_title = "Agregar codigo"
+        prompt_label = "Nombre del codigo:"
         code_label, ok = QInputDialog.getText(self, prompt_title, prompt_label)
         if not ok:
             return
@@ -2053,154 +2080,96 @@ class RaizQAGUI(QMainWindow):
             QMessageBox.warning(self, "Agregar codigo", "El nombre del codigo no puede quedar vacio.")
             return
 
-        if self._code_name_exists(code_label):
+        if code_label in self.codes_dict:
             QMessageBox.warning(self, "Agregar codigo", "Ya existe un codigo con ese nombre.")
             return
 
-        parent_color = None
-        if parent_name:
-            parent_data = self.get_code_data(parent_name)
-            parent_color = parent_data.get("color") if parent_data else None
-
-        color_hex = self.ask_color_from_palette(parent_color or self.next_palette_color())
-        self._append_code_entry(code_label, parent_item=parent_item, color_hex=color_hex)
-        self._rebuild_codes_from_tree()
-        self.save_project()
-
-    def _build_fragment(self, text, start, end, color_hex, is_image=False, image_selection=None, note=None):
-        fragment = {
-            "text": text,
-            "document": self.current_doc,
-            "start": start,
-            "end": end,
-            "color": color_hex,
-            "type": "image" if is_image else "text",
-        }
-        if is_image:
-            selection = image_selection or {}
-            fragment["text"] = text or "<IMAGE>"
-            fragment["comment"] = note or text or ""
-            rect = selection.get("rect")
-            image_size = selection.get("image_size")
-            if rect:
-                fragment["rect"] = rect
-                fragment["area"] = int(rect.get("w", 0) * rect.get("h", 0))
-            if image_size:
-                fragment["image_size"] = image_size
-                total = max(1, image_size.get("w", 0) * image_size.get("h", 0))
-                fragment["coverage"] = round(fragment.get("area", 0) / total, 6)
-        return fragment
+        color_hex = self.ask_color_from_palette(self.next_palette_color())
+        
+        # Peticion MVC
+        self.signal_req_add_code.emit(code_label, color_hex, "")
 
     def create_new_code(self, selected_text, start, end, parent_item=None, code_label=None, is_image=False, note=None, image_selection=None):
         if not self.current_doc:
             QMessageBox.warning(self, "Nuevo codigo", "Selecciona un documento antes de codificar.")
             return
+
+        # (Eliminamos el QMessageBox que bloqueaba is_image)
+
         if not is_image and (start is None or end is None or start == end):
             return
 
         if not code_label:
-            prompt_title = "Nuevo Codigo (imagen)" if is_image else "Nuevo Codigo"
-            code_label, ok = QInputDialog.getText(self, prompt_title, "Nombre del codigo:")
+            code_label, ok = QInputDialog.getText(self, "Nuevo Codigo", "Nombre del codigo:")
             if not ok or not code_label:
                 return
         code_label = code_label.strip()
         if not code_label:
             QMessageBox.warning(self, "Nuevo codigo", "El nombre del codigo no puede quedar vacio.")
             return
-        if self._code_name_exists(code_label):
-            QMessageBox.warning(self, "Nuevo codigo", "Ya existe un codigo con ese nombre.")
+            
+        if code_label in self.codes_dict:
+            QMessageBox.warning(self, "Nuevo codigo", "Ya existe un codigo con ese nombre. Usa 'Agregar a codigo existente'.")
             return
 
-        parent_name = self._code_item_name(parent_item) if parent_item else None
-        parent_color = None
-        if parent_name:
-            parent_data = self.get_code_data(parent_name)
-            parent_color = parent_data.get("color") if parent_data else None
+        color_hex = self.ask_color_from_palette(self.next_palette_color())
 
-        suggested_color = parent_color or self.next_palette_color()
-        color_hex = self.ask_color_from_palette(suggested_color)
-
-        if is_image:
-            selection = image_selection or self._image_selection_payload()
-            note_text = note if note is not None else self._prompt_image_note("Nuevo fragmento (imagen)", "Descripcion del fragmento (opcional):")
-            if note_text is None:
-                return
-            selected_text = note_text
-            start = None
-            end = None
+        # 1. Crear el código en el backend
+        self.signal_req_add_code.emit(code_label, color_hex, "")
+        
+        # 2. Construir el paquete de datos del fragmento
+        if is_image and image_selection:
+            fragment_data = {
+                "type": "image",
+                "rect": image_selection["rect"],
+                "image_size": image_selection["image_size"],
+                "note": note
+            }
         else:
-            selection = None
+            fragment_data = {
+                "type": "text",
+                "start": start,
+                "end": end
+            }
 
-        fragment = self._build_fragment(selected_text, start, end, color_hex, is_image=is_image, image_selection=selection, note=note)
-        self._append_code_entry(code_label, parent_item=parent_item, color_hex=color_hex, fragment=fragment)
+        # 3. Emitir el fragmento al backend
+        self.signal_req_add_fragment.emit(code_label, self.current_doc, fragment_data)
 
-        if not is_image:
-            self.highlight_fragment(fragment, QColor(color_hex))
-        else:
-            self.image_viewer.clear_selection()
-        self.save_current_highlights()
-        self._rebuild_codes_from_tree()
-        self.save_project()
-
-    def _append_code_entry(self, code_label, parent_item=None, color_hex=None, fragment=None):
-        parent_name = self._code_item_name(parent_item) if parent_item else None
-        stored_color = color_hex or self.next_palette_color()
-        fragments = [fragment] if fragment else []
-        count = len(fragments)
-
-        code_item = QTreeWidgetItem([code_label, str(count), ""])
-        code_item.setData(0, Qt.UserRole + 1, code_label)
-        self._configure_code_item(code_item)
-        if parent_item:
-            parent_item.addChild(code_item)
-            parent_item.setExpanded(True)
-        else:
-            self.code_tree.addTopLevelItem(code_item)
-        self.apply_code_item_color(code_item, stored_color)
-
-        self.codes.append({
-            "name": code_label,
-            "parent": parent_name,
-            "memo": "",
-            "color": stored_color,
-            "count": count,
-            "fragments": fragments,
-        })
-        return code_item
+        # 4. Dibujar localmente de inmediato
+        fragment_visual = fragment_data.copy()
+        fragment_visual["color"] = color_hex
+        fragment_visual["document"] = self.current_doc
+        self.highlight_fragment(fragment_visual, QColor(color_hex))
 
 
     def add_to_existing_code(self, code_name, selected_text, start, end, is_image=False, note=None, image_selection=None):
-        if not self.current_doc:
+        if not self.current_doc or code_name not in self.codes_dict:
             return
 
-        code_data = self.get_code_data(code_name)
-        if not code_data:
-            return
-
-        if is_image:
-            selection = image_selection or self._image_selection_payload()
-            note_text = note if note is not None else self._prompt_image_note("Agregar a codigo", "Descripcion del fragmento (opcional):")
-            if note_text is None:
-                return
-            selected_text = note_text
-            start = None
-            end = None
+        # Construir el paquete de datos del fragmento
+        if is_image and image_selection:
+            fragment_data = {
+                "type": "image",
+                "rect": image_selection["rect"],
+                "image_size": image_selection["image_size"],
+                "note": note
+            }
         else:
-            selection = None
+            fragment_data = {
+                "type": "text",
+                "start": start,
+                "end": end
+            }
 
-        color_hex = code_data.get("color", "#fff59d")
-        fragment = self._build_fragment(selected_text, start, end, color_hex, is_image=is_image, image_selection=selection, note=note)
+        # 1. Petición MVC: Agregar fragmento
+        self.signal_req_add_fragment.emit(code_name, self.current_doc, fragment_data)
 
-        code_data.setdefault("fragments", []).append(fragment)
-        code_data["count"] = len(code_data["fragments"])
-        self.update_code_count(code_name, code_data["count"])
-        if not is_image:
-            self.highlight_fragment(fragment, QColor(color_hex))
-        else:
-            self.image_viewer.clear_selection()
-        self.save_current_highlights()
-        self.save_project()
-
+        # 2. Dibujarlo localmente
+        color_hex = self.codes_dict[code_name].get("hexcolor", "#fff59d")
+        fragment_visual = fragment_data.copy()
+        fragment_visual["color"] = color_hex
+        fragment_visual["document"] = self.current_doc
+        self.highlight_fragment(fragment_visual, QColor(color_hex))
 
     def highlight_fragment(self, fragment, color=None):
         """Resalta un fragmento solo en su documento correspondiente."""
@@ -2272,19 +2241,11 @@ class RaizQAGUI(QMainWindow):
 
     def _get_code_color(self, fragment):
         """Obtiene el color asociado al código padre de un fragmento."""
-        for c in self.codes:
-            if fragment in c.get("fragments", []):
-                return c.get("color", "#fff59d")
-        return "#fff59d"
-
-    def update_code_count(self, code_name, new_count):
-        iterator = QTreeWidgetItemIterator(self.code_tree)
-        while iterator.value():
-            item = iterator.value()
-            if self._code_item_name(item) == code_name:
-                item.setText(1, str(new_count))
-                break
-            iterator += 1
+        for code_name, data in self.codes_dict.items():
+            for doc, frags in data.get("fragments", {}).items():
+                if fragment in frags:
+                    return data.get("hexcolor", "#fff59d")
+        return fragment.get("color", "#fff59d")
 
     def create_subcode(self, selected_text, start, end):
         iterator = QTreeWidgetItemIterator(self.code_tree)
@@ -2317,19 +2278,48 @@ class RaizQAGUI(QMainWindow):
             iterator += 1
         return None
 
+    def get_hydrated_codes_dict(self):
+            """Genera una copia de codes_dict inyectando el texto real de los fragmentos, 
+            para que los módulos externos puedan mostrar el texto sin fallar."""
+            import copy
+            hydrated = copy.deepcopy(self.codes_dict)
+            
+            if not self.current_project:
+                return hydrated
+                
+            for code_name, data in hydrated.items():
+                for doc_name, frags in data.get("fragments", {}).items():
+                    # Cargamos el texto completo del documento (con caché en memoria gracias a project.py)
+                    doc_text = self.current_project.get_document_text(doc_name)
+                    
+                    for frag in frags:
+                        if "text" not in frag:
+                            start = frag.get("start", 0)
+                            end = frag.get("end", 0)
+                            # Cortamos el string y creamos la llave "text" que espera la UI
+                            frag["text"] = doc_text[start:end]
+                            
+            return hydrated
+
 
     # -------------------- VER CÓDIGOS --------------------
     def open_code_viewer(self):
-        if not self.codes:
+        if not self.codes_dict:
             QMessageBox.information(self, "Códigos", "No hay códigos creados aún.")
             return
         if not self.current_doc:
             QMessageBox.information(self, "Códigos", "Primero selecciona un documento.")
             return
+            
         doc_path = self.current_project.get_document_path(self.current_doc)
+        
+        # 1. Obtenemos el diccionario con los textos ya inyectados
+        hydrated_codes = self.get_hydrated_codes_dict()
+        
+        # 2. Se lo pasamos al módulo externo en lugar de self.codes_dict
         viewer = CodeViewerWindow(
             doc_path,
-            self.codes,
+            hydrated_codes,  # <--- Cambio clave aquí
             theme=self._current_theme(),
             dark_mode=self.is_dark_mode,
         )
@@ -2339,11 +2329,13 @@ class RaizQAGUI(QMainWindow):
         if not self.current_project:
             QMessageBox.information(self, "Temas y categorÃ­as", "Primero abre o crea un proyecto.")
             return
-        codes = [c.get("name") for c in self.codes if c.get("name")]
+        codes = list(self.codes_dict.keys())
         dialog = ThemesCategoriesDialog(codes, self.code_themes, parent=self)
         if dialog.exec() == QDialog.Accepted:
             self.code_themes = dialog.get_themes_data()
             self.save_project()
+
+            self.populate_code_tree()
 
     def open_compare_dialog(self):
         if not self.current_project:
@@ -2357,7 +2349,7 @@ class RaizQAGUI(QMainWindow):
         right = None
         if len(docs) >= 2:
             right = docs[1] if docs[0] == left else docs[0]
-        dialog = CompareDialog(self.current_project, self.codes, left_doc=left, right_doc=right, parent=self)
+        dialog = CompareDialog(self.current_project, self.codes_dict, left_doc=left, right_doc=right, parent=self)
         dialog.exec()
 
     def open_code_matrix(self):
@@ -2368,10 +2360,10 @@ class RaizQAGUI(QMainWindow):
         if not docs:
             QMessageBox.information(self, "Code Matrix", "No hay documentos para mostrar.")
             return
-        if not self.codes:
+        if not self.codes_dict:
             QMessageBox.information(self, "Code Matrix", "No hay códigos creados aún.")
             return
-        dialog = CodeMatrixDialog(docs, self.codes, current_doc=self.current_doc, parent=self)
+        dialog = CodeMatrixDialog(docs, self.codes_dict, current_doc=self.current_doc, parent=self)
         dialog.exec()
 
     def open_wordcloud_dialog(self):
@@ -2392,7 +2384,7 @@ class RaizQAGUI(QMainWindow):
         if not self.code_themes:
             QMessageBox.information(self, "Analisis de temas", "No hay temas o categorias creadas.")
             return
-        dialog = ThemesAnalysisDialog(self.codes, self.code_themes, self.current_project, parent=self)
+        dialog = ThemesAnalysisDialog(self.codes_dict, self.code_themes, self.current_project, parent=self)
         dialog.exec()
 
     def open_case_study(self):
@@ -2403,12 +2395,12 @@ class RaizQAGUI(QMainWindow):
         if not docs:
             QMessageBox.information(self, "Estudio de casos", "No hay documentos para analizar.")
             return
-        if not self.codes:
+        if not self.codes_dict:
             QMessageBox.information(self, "Estudio de casos", "No hay cÃ³digos creados aÃºn.")
             return
         dialog = CaseStudyDialog(
             self.current_project,
-            self.codes,
+            self.codes_dict,
             docs,
             self.case_studies,
             self.doc_groups,
@@ -2421,14 +2413,9 @@ class RaizQAGUI(QMainWindow):
 
     # -------------------- EXPORTAR SISTEMA DE CÓDIGOS --------------------
     def export_code_tree(self):
-        if not self.codes:
+        if not self.codes_dict:
             QMessageBox.information(self, "Exportar libro de códigos", "No hay códigos para exportar.")
             return
-
-        excel_deps = self._load_excel_export_dependencies("Exportar libro de códigos")
-        if not excel_deps:
-            return
-        Workbook, _, _, _ = excel_deps
 
         path = self._ask_excel_export_path("Guardar libro de códigos", "libro_de_codigos.xlsx")
         if not path:
@@ -2439,21 +2426,13 @@ class RaizQAGUI(QMainWindow):
             QMessageBox.information(self, "Exportar libro de códigos", "No se encontraron códigos en el árbol.")
             return
 
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "Libro de códigos"
-        self._write_codebook_sheet(ws, rows, title_text="Libro de códigos", frequency_label="Frecuencia")
-        self._save_excel_workbook(wb, path, "Exportar libro de códigos", "Libro de códigos exportado en:")
+        # Emitimos señal al backend
+        self.signal_req_export_code_tree.emit(rows, path)
 
     def export_code_fragments(self):
-        if not self.codes:
+        if not self.codes_dict:
             QMessageBox.information(self, "Exportar fragmentos", "No hay códigos para exportar.")
             return
-
-        excel_deps = self._load_excel_export_dependencies("Exportar fragmentos")
-        if not excel_deps:
-            return
-        Workbook, _, _, _ = excel_deps
 
         rows = self._collect_code_rows_for_export(text_only=True)
         if not rows:
@@ -2479,33 +2458,10 @@ class RaizQAGUI(QMainWindow):
             return
 
         fragment_rows = self._collect_text_fragments_for_export(selected_names)
-        wb = Workbook()
-        ws_codes = wb.active
-        ws_codes.title = "Libro de códigos"
-        self._write_codebook_sheet(ws_codes, selected_rows, title_text="Libro de códigos", frequency_label="Fragmentos")
+        # Emitimos señal al backend
+        self.signal_req_export_code_fragments.emit(selected_rows, fragment_rows, path)
 
-        ws_fragments = wb.create_sheet("Fragmentos")
-        self._write_fragments_sheet(ws_fragments, fragment_rows)
-
-        self._save_excel_workbook(
-            wb,
-            path,
-            "Exportar fragmentos",
-            "Libro de códigos y fragmentos exportados en:",
-        )
-
-    def _load_excel_export_dependencies(self, dialog_title):
-        try:
-            from openpyxl import Workbook
-            from openpyxl.styles import Font, PatternFill, Alignment
-        except ImportError:
-            QMessageBox.critical(
-                self,
-                dialog_title,
-                "Falta la dependencia 'openpyxl'. Agrega 'openpyxl' a requirements e instálala para exportar.",
-            )
-            return None
-        return Workbook, Font, PatternFill, Alignment
+    # (Dependencies load removed)
 
     def _ask_excel_export_path(self, dialog_title, default_filename):
         save_dir = self.working_dir or os.getcwd()
@@ -2518,90 +2474,7 @@ class RaizQAGUI(QMainWindow):
         )
         return path
 
-    def _save_excel_workbook(self, workbook, path, dialog_title, success_message):
-        try:
-            workbook.save(path)
-            QMessageBox.information(self, dialog_title, f"{success_message}\n{path}")
-        except Exception as exc:
-            QMessageBox.critical(self, dialog_title, f"No se pudo guardar el archivo:\n{exc}")
-
-    def _write_codebook_sheet(self, worksheet, rows, title_text="Libro de códigos", frequency_label="Frecuencia"):
-        _, Font, PatternFill, Alignment = self._load_excel_export_dependencies(title_text)
-        header = [title_text, "", "", "", "Memo", frequency_label]
-        worksheet.append(header)
-
-        header_fill = PatternFill(start_color="5d9bd3", end_color="5d9bd3", fill_type="solid")
-        data_fill = PatternFill(start_color="f6f8fb", end_color="f6f8fb", fill_type="solid")
-        bold = Font(bold=True)
-        memo_col = 5
-        freq_col = 6
-
-        for col_idx in range(1, len(header) + 1):
-            cell = worksheet.cell(row=1, column=col_idx)
-            cell.font = bold
-            cell.fill = header_fill
-            cell.alignment = Alignment(vertical="center")
-
-        for row_data in rows:
-            level = row_data["level"]
-            total_cols = max(freq_col, 1 + level)
-            row = ["" for _ in range(total_cols)]
-            name_col = 1 + level
-            row[name_col - 1] = row_data["name"]
-            if memo_col - 1 >= len(row):
-                row.extend([""] * (memo_col - len(row)))
-            row[memo_col - 1] = row_data.get("memo") or ""
-            if freq_col - 1 >= len(row):
-                row.extend([""] * (freq_col - len(row)))
-            row[freq_col - 1] = row_data.get("freq", "")
-            worksheet.append(row)
-            current_row = worksheet.max_row
-            for col_idx in range(1, freq_col + 1):
-                cell = worksheet.cell(row=current_row, column=col_idx)
-                cell.fill = data_fill
-                cell.alignment = Alignment(vertical="top", wrap_text=True)
-
-        for col_name in ("A", "B", "C", "D"):
-            worksheet.column_dimensions[col_name].width = 36
-        worksheet.column_dimensions["E"].width = 48
-        worksheet.column_dimensions["F"].width = 14
-
-        for row in worksheet.iter_rows(min_row=1, max_row=worksheet.max_row, min_col=1, max_col=freq_col):
-            for cell in row:
-                cell.alignment = Alignment(vertical="top", wrap_text=True)
-
-    def _write_fragments_sheet(self, worksheet, fragment_rows):
-        _, Font, PatternFill, Alignment = self._load_excel_export_dependencies("Exportar fragmentos")
-        header = ["Código", "Documento", "Fragmento", "Memo"]
-        worksheet.append(header)
-
-        header_fill = PatternFill(start_color="5d9bd3", end_color="5d9bd3", fill_type="solid")
-        data_fill = PatternFill(start_color="f6f8fb", end_color="f6f8fb", fill_type="solid")
-        bold = Font(bold=True)
-
-        for col_idx in range(1, len(header) + 1):
-            cell = worksheet.cell(row=1, column=col_idx)
-            cell.font = bold
-            cell.fill = header_fill
-            cell.alignment = Alignment(vertical="center")
-
-        for fragment in fragment_rows:
-            worksheet.append([
-                fragment.get("code_name", ""),
-                fragment.get("document", ""),
-                fragment.get("text", ""),
-                fragment.get("memo", ""),
-            ])
-            current_row = worksheet.max_row
-            for col_idx in range(1, len(header) + 1):
-                cell = worksheet.cell(row=current_row, column=col_idx)
-                cell.fill = data_fill
-                cell.alignment = Alignment(vertical="top", wrap_text=True)
-
-        worksheet.column_dimensions["A"].width = 28
-        worksheet.column_dimensions["B"].width = 28
-        worksheet.column_dimensions["C"].width = 100
-        worksheet.column_dimensions["D"].width = 48
+    # (Export writing helpers moved to core.export_manager)
 
     def _collect_code_rows_for_export(self, selected_names=None, text_only=False):
         """Devuelve filas del árbol de códigos respetando el orden visual actual."""
@@ -2619,18 +2492,20 @@ class RaizQAGUI(QMainWindow):
             return code_data.get("memo") if code_data else ""
 
         def fragments_for(code_data):
-            fragments = list((code_data or {}).get("fragments", []) or [])
+            fragments = []
+            for doc, frags in (code_data or {}).get("fragments", {}).items():
+                for f in frags:
+                    f_copy = dict(f)
+                    f_copy["document"] = doc
+                    f_copy["type"] = f.get("type", "text")
+                    fragments.append(f_copy)
             if text_only:
-                fragments = [frag for frag in fragments if (frag.get("type") or "text") != "image"]
+                fragments = [frag for frag in fragments if frag.get("type") != "image"]
             return fragments
 
         def freq_for(code_data):
             if not code_data:
-                return ""
-            if text_only:
-                return len(fragments_for(code_data))
-            if "count" in code_data:
-                return code_data.get("count")
+                return 0
             return len(fragments_for(code_data))
 
         def walk(item, level):
@@ -2658,15 +2533,18 @@ class RaizQAGUI(QMainWindow):
             code_data = self.get_code_data(code_name)
             if not code_data:
                 continue
-            for fragment in code_data.get("fragments", []) or []:
-                if (fragment.get("type") or "text") == "image":
-                    continue
-                fragments.append({
-                    "code_name": code_name,
-                    "document": fragment.get("document", ""),
-                    "text": self._resolve_fragment_export_text(fragment),
-                    "memo": row.get("memo", ""),
-                })
+            for doc, frags in code_data.get("fragments", {}).items():
+                for fragment in frags:
+                    if fragment.get("type", "text") == "image":
+                        continue
+                    f_copy = dict(fragment)
+                    f_copy["document"] = doc
+                    fragments.append({
+                        "code_name": code_name,
+                        "document": doc,
+                        "text": self._resolve_fragment_export_text(f_copy),
+                        "memo": row.get("memo", ""),
+                    })
         return fragments
 
     def _resolve_fragment_export_text(self, fragment):
@@ -2722,23 +2600,8 @@ class RaizQAGUI(QMainWindow):
 
 
     def save_current_highlights(self):
-        """Guarda los subrayados del documento actual en self.highlights."""
-        if not self.current_doc:
-            return
-
-        # Filtrar los fragmentos del documento actual
-        doc_fragments = []
-        for c in self.codes:
-            for frag in c.get("fragments", []):
-                if frag.get("document") == self.current_doc:
-                    if not frag.get("color"):
-                        frag["color"] = c.get("color", "#fff59d")
-                    doc_fragments.append(frag)
-
-        self.highlighted = doc_fragments  # mantener en memoria para el documento actual
-        self.highlights[self.current_doc] = doc_fragments
-        if self._is_current_doc_image():
-            self.image_viewer.set_fragments(doc_fragments)
+        """Metodo obsoleto. Las EDDs se encargan de persistir los fragmentos nativamente."""
+        pass
 
 
     # -------------------------
@@ -2790,7 +2653,7 @@ class RaizQAGUI(QMainWindow):
             code_name = self._code_item_name(item)
             code = self.get_code_data(code_name)
             if code:
-                self.apply_code_item_color(item, code.get("color", "#fff59d"))
+                self.apply_code_item_color(item, code.get("hexcolor", "#fff59d"))
             iterator += 1
 
     def _circle_icon(self, color):
@@ -2805,10 +2668,7 @@ class RaizQAGUI(QMainWindow):
         return QIcon(pixmap)
 
     def get_code_data(self, code_name):
-        for code in self.codes:
-            if code["name"] == code_name:
-                return code
-        return None
+        return self.codes_dict.get(code_name)
 
     def _suggest_live_code_name(self, text):
         words = (text or "").split()

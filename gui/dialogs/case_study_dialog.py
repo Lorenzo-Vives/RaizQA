@@ -18,18 +18,18 @@ from gui.dialogs.case_setup_dialog import CaseSetupDialog
 
 
 class CaseStudyDialog(QDialog):
-    def __init__(self, project, codes, documents, case_studies, doc_groups, parent=None):
+    def __init__(self, project, codes_dict, documents, case_studies, doc_groups, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Estudio de casos")
         self.resize(860, 520)
         self.project = project
-        self.codes = codes or []
+        self.codes_dict = codes_dict or {}
         self.documents = documents or []
         self.doc_groups = doc_groups or {}
         self.case_studies = case_studies or []
         self.updated = False
         self._loading_case = False
-        self._codes_by_name = {c.get("name"): c for c in self.codes if c.get("name")}
+        self._codes_by_name = self.codes_dict
         self._children = self._build_children_map()
         self._build_ui()
         if not self.case_studies:
@@ -104,13 +104,9 @@ class CaseStudyDialog(QDialog):
             self._load_case_details(None)
 
     def _build_children_map(self):
-        children = {}
-        for code in self.codes:
-            name = code.get("name")
-            parent = code.get("parent")
-            if not name:
-                continue
-            children.setdefault(parent, []).append(name)
+        children = {None: []}
+        for code_name in self.codes_dict.keys():
+            children[None].append(code_name)
         return children
 
     def _case_docs(self, case_name):
@@ -144,26 +140,25 @@ class CaseStudyDialog(QDialog):
 
     def _doc_counts(self, doc_names):
         counts = {}
-        for code in self.codes:
-            name = code.get("name")
-            if not name:
-                continue
-            frags = code.get("fragments", []) or []
-            doc_frags = [f for f in frags if f.get("document") in doc_names]
+        for code_name, data in self.codes_dict.items():
+            doc_frags = []
+            for doc in doc_names:
+                doc_frags.extend(data.get("fragments", {}).get(doc, []))
             if doc_frags:
-                counts[name] = len(doc_frags)
+                counts[code_name] = len(doc_frags)
         return counts
 
     def _doc_fragments_by_code(self, doc_names):
         mapping = {}
-        for code in self.codes:
-            name = code.get("name")
-            if not name:
-                continue
-            frags = code.get("fragments", []) or []
-            doc_frags = [f for f in frags if f.get("document") in doc_names]
+        for code_name, data in self.codes_dict.items():
+            doc_frags = []
+            for doc in doc_names:
+                for f in data.get("fragments", {}).get(doc, []):
+                    f_copy = dict(f)
+                    f_copy["document"] = doc
+                    doc_frags.append(f_copy)
             if doc_frags:
-                mapping[name] = doc_frags
+                mapping[code_name] = doc_frags
         return mapping
 
     def _should_show_code(self, name, counts):
@@ -268,7 +263,7 @@ class CaseStudyDialog(QDialog):
         dark_mode = getattr(parent, "is_dark_mode", False)
         viewer = CodeViewerWindow(
             doc_path,
-            self.codes,
+            self.codes_dict,
             theme=theme,
             dark_mode=dark_mode,
         )

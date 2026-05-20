@@ -78,12 +78,12 @@ class CodeMatrixDialog(QDialog):
     SCOPE_SELECTED = "Documentos elegidos"
     SCOPE_ALL = "Todos los documentos"
 
-    def __init__(self, documents, codes, current_doc=None, parent=None):
+    def __init__(self, documents, codes_dict, current_doc=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Code Matrix Browser")
         self.resize(1160, 720)
         self.documents = list(documents or [])
-        self.codes = list(codes or [])
+        self.codes_dict = codes_dict or {}
         self.current_doc = current_doc if current_doc in self.documents else (self.documents[0] if self.documents else None)
         self.selected_documents = [self.current_doc] if self.current_doc else list(self.documents)
         self.is_dark_mode = bool(getattr(parent, "is_dark_mode", False))
@@ -271,33 +271,28 @@ class CodeMatrixDialog(QDialog):
         ]
 
     def _code_names(self):
-        names = [code.get("name", "") for code in self.codes if code.get("name")]
+        names = list(self.codes_dict.keys())
         if self.cbo_sort.currentText() == "Total descendente":
             totals = {name: self._code_total(name) for name in names}
             return sorted(names, key=lambda name: (-totals.get(name, 0), name.lower()))
         return sorted(names, key=lambda name: name.lower())
 
     def _code_total(self, code_name):
-        code = self._code_by_name(code_name)
-        return len(code.get("fragments", [])) if code else 0
+        code_data = self.codes_dict.get(code_name)
+        if not code_data:
+            return 0
+        return sum(len(frags) for frags in code_data.get("fragments", {}).values())
 
     def _code_by_name(self, code_name):
-        for code in self.codes:
-            if code.get("name") == code_name:
-                return code
-        return None
+        return self.codes_dict.get(code_name)
 
     def _frequency_matrix(self, active_docs):
         counts = {}
         active_set = set(active_docs)
-        for code in self.codes:
-            code_name = code.get("name", "")
-            if not code_name:
-                continue
-            for frag in code.get("fragments", []) or []:
-                doc_name = frag.get("document")
+        for code_name, data in self.codes_dict.items():
+            for doc_name, frags in data.get("fragments", {}).items():
                 if doc_name in active_set:
-                    counts[(code_name, doc_name)] = counts.get((code_name, doc_name), 0) + 1
+                    counts[(code_name, doc_name)] = counts.get((code_name, doc_name), 0) + len(frags)
 
         row_labels = self._code_names()
         matrix = []
@@ -308,14 +303,17 @@ class CodeMatrixDialog(QDialog):
     def _fragments_by_code(self, active_docs, code_rows):
         active_set = set(active_docs)
         by_code = {code_name: [] for code_name in code_rows}
-        for code in self.codes:
-            code_name = code.get("name", "")
+        for code_name, data in self.codes_dict.items():
             if code_name not in by_code:
                 continue
-            by_code[code_name] = [
-                frag for frag in (code.get("fragments", []) or [])
-                if frag.get("document") in active_set
-            ]
+            for doc, frags in data.get("fragments", {}).items():
+                if doc in active_set:
+                    for frag in frags:
+                        f_copy = dict(frag)
+                        f_copy["document"] = doc
+                        f_copy["_code_name"] = code_name
+                        f_copy["color"] = data.get("hexcolor", "#fff59d")
+                        by_code[code_name].append(f_copy)
         return by_code
 
     def _cooccurrence_matrix(self, active_docs, code_rows):
