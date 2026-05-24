@@ -13,6 +13,7 @@ from PySide6.QtCore import Qt, QTimer, QPoint, QEvent, Signal
 from docx import Document
 
 from gui.widgets.local_search import LocalSearchWidget
+from gui.widgets.document_editor import DocumentEditorController
 from gui.dialogs.memo_dialog import MemoDialog
 from gui.dialogs.fragments_dialog import CodeFragmentsDialog
 from gui.dialogs.diary_dialog import DiaryDialog
@@ -44,6 +45,7 @@ class RaizQAGUI(QMainWindow):
     signal_req_delete_code = Signal(str)
     signal_req_update_code = Signal(str, str, str, str)
     signal_req_add_fragment = Signal(str, str, object)
+    signal_req_update_document = Signal(str, str)
     
     AUTO_SAVE_INTERVAL = 30000
     COLOR_PALETTE = [
@@ -419,6 +421,17 @@ class RaizQAGUI(QMainWindow):
         tab_bar_layout = QHBoxLayout(tab_bar)
         tab_bar_layout.setContentsMargins(8, 2, 8, 2)
         tab_bar_layout.setSpacing(6)
+        
+        # NUEVO: Botones para la edición del documento
+        self.btn_edit_doc = QPushButton("✏️ Editar")
+        self.btn_save_doc = QPushButton("💾 Guardar")
+        self.btn_cancel_doc = QPushButton("❌ Cancelar")
+
+        for btn in [self.btn_edit_doc, self.btn_save_doc, self.btn_cancel_doc]:
+            btn.setObjectName("GhostButton")
+            btn.setCursor(Qt.PointingHandCursor)
+            tab_bar_layout.addWidget(btn)
+            
         tab_bar_layout.addStretch()
         text_layout.addWidget(tab_bar)
 
@@ -430,6 +443,12 @@ class RaizQAGUI(QMainWindow):
         self.text_area.customContextMenuRequested.connect(self.text_context_menu)
         self.text_area.installEventFilter(self)
         self.viewer_stack.addWidget(self.text_area)
+
+        # NUEVO: Inicializar el controlador del editor
+        self.doc_editor_controller = DocumentEditorController(
+            self.text_area, self.btn_edit_doc, self.btn_save_doc, self.btn_cancel_doc
+        )
+        self.doc_editor_controller.signal_save_requested.connect(self.signal_req_update_document.emit)
 
         self.image_viewer = ImageDocumentViewer(self)
         self.image_viewer.selectionChanged.connect(self._on_image_selection_changed)
@@ -1188,16 +1207,31 @@ class RaizQAGUI(QMainWindow):
 
         if not new_name:
             self._restore_code_item_label(item)
-            QMessageBox.warning(self, "Renombrar codigo", "El nombre del codigo no puede quedar vacio.")
+            QMessageBox.warning(self, "Renombrar código", "El nombre del código no puede quedar vacío.")
             return
 
         if new_name in self.codes_dict:
             self._restore_code_item_label(item)
-            QMessageBox.warning(self, "Renombrar codigo", "Ya existe un codigo con ese nombre.")
+            QMessageBox.warning(self, "Renombrar código", "Ya existe un código con ese nombre.")
             return
 
+        # 1. Recuperar los datos existentes ANTES de emitir la señal para no perderlos
+        code_data = self.get_code_data(old_name)
+        color_hex = code_data.get("hexcolor", "#fff59d") if code_data else "#fff59d"
+        memo_text = code_data.get("memo", "") if code_data else ""
+        
+        # 2. Sincronizar con el gestor independiente de Memos (si el proyecto lo está usando)
+        if self.memo_manager:
+            old_memo = self.memo_manager.get_memo(old_name)
+            if old_memo:
+                memo_text = old_memo
+                self.memo_manager.add_or_update_memo(new_name, old_memo)
+                self.memo_manager.delete_memo(old_name)
+
         self._restore_code_item_label(item)
-        self.signal_req_update_code.emit(old_name, new_name, None, None)
+        
+        # 3. Emitir la señal con todos los datos intactos (evitando usar None)
+        self.signal_req_update_code.emit(old_name, new_name, color_hex, memo_text)
 
     # -------------------- FUNCIONES BÁSICAS --------------------
     def select_working_dir(self):
@@ -1813,17 +1847,24 @@ class RaizQAGUI(QMainWindow):
         #  2. Actualizar el documento actual
         self._clear_column_selection()
         self.current_doc = current.text(0)
+        
         if self.current_project:
             doc_path = self.current_project.get_document_path(self.current_doc)
             if self._is_image_document(self.current_doc):
+                # Desactivar editor si es imagen
+                self.doc_editor_controller.load_document(None, "") 
                 self._show_image_document(doc_path)
             else:
                 self._show_text_viewer()
                 text = self.current_project.read_document(self.current_doc)
                 self.text_area.setPlainText(text)
+                
+                # 👇 ¡ESTA ES LA LÍNEA QUE FALTA PARA QUE APAREZCA EL BOTÓN! 👇
+                self.doc_editor_controller.load_document(self.current_doc, text)
         else:
             self.text_area.clear()
             self.image_viewer.clear_image()
+            self.doc_editor_controller.load_document(None, "")
 
         #  3. Restaurar los subrayados del documento nuevo DIRECTAMENTE desde codes_dict
         self.highlighted = []

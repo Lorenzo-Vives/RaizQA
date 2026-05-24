@@ -3,3 +3,4 @@ PyPDF2>=3.0
 python-docx>=0.8.11
 pyspellchecker>=0.8.1
 openpyxl>=3.1.2
+diff-match-patch

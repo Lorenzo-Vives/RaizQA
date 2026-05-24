@@ -118,9 +118,25 @@ class ControladorLogico(QObject):
         self.current_project.save_edds()
         self.edds_updated.emit(self.current_project.codes_dict, self.current_project.themes_dict)
 
-# En logica.py
     def req_add_fragment(self, code_name, doc_name, fragment_data):
         if not self.current_project: return
         self.current_project.add_fragment(code_name, doc_name, fragment_data)
         self.current_project.save_edds()
         self.edds_updated.emit(self.current_project.codes_dict, self.current_project.themes_dict)
+
+    def req_update_document(self, doc_name, new_text):
+        """Petición de la UI para sobrescribir un documento editado."""
+        if not self.current_project: return
+        try:
+            # 1. El proyecto actualiza el archivo y resincroniza los índices
+            self.current_project.update_document_text(doc_name, new_text)
+            
+            # 2. Guardamos la EDD (codes_dict) actualizada en disco (.json)
+            self.current_project.save_edds()
+            
+            # 3. Emitimos la señal para que la UI repinte los subrayados 
+            # en sus nuevas posiciones exactas.
+            self.edds_updated.emit(self.current_project.codes_dict, self.current_project.themes_dict)
+            
+        except Exception as e:
+            self.error_occurred.emit(f"Error al guardar el documento editado: {str(e)}")

@@ -3,6 +3,7 @@ import json
 import shutil
 from docx import Document as DocxDocument
 from PyPDF2 import PdfReader
+from diff_match_patch import diff_match_patch
 
 from core.memos import MemoManager
 from core.pointer_manager import PointerManager
@@ -331,3 +332,66 @@ class Project:
         self.codes_dict = data.get("codes_dict", {})
         self.themes_dict = data.get("themes_dict", {})
 
+    def update_document_text(self, doc_name, new_text):
+        """
+        Actualiza el texto en disco y resincroniza dinámicamente 
+        los índices de los códigos asociados usando Diff-Match-Patch.
+        """
+        # 1. Leer el texto original ANTES de sobrescribirlo
+        old_text = self.read_document(doc_name)
+        
+        # 2. Sincronizar la Estructura de Datos (EDD)
+        self._sync_fragment_indices(doc_name, old_text, new_text)
+        
+        # 3. Sobrescribir el archivo en disco
+        doc_path = self.get_document_path(doc_name)
+        with open(doc_path, 'w', encoding='utf-8') as f:
+            f.write(new_text)
+
+    def _sync_fragment_indices(self, doc_name, old_text, new_text):
+        """
+        Busca dónde aterrizaron los fragmentos antiguos dentro del texto nuevo.
+        """
+        dmp = diff_match_patch()
+        
+        # Tolerancia del algoritmo (0.0 es exacto, 0.5 es muy flexible)
+        # 0.3 es un buen balance: permite pequeñas correcciones ortográficas 
+        # sin perder el fragmento, pero falla si cambian la frase entera.
+        dmp.Match_Threshold = 0.3 
+        
+        for code_name, data in self.codes_dict.items():
+            fragments = data.get("fragments", {}).get(doc_name, [])
+            valid_fragments = []
+            
+            for frag in fragments:
+                # Ignorar imágenes u otros tipos de datos
+                if frag.get("type") != "text":
+                    valid_fragments.append(frag)
+                    continue
+                    
+                start = frag.get("start")
+                end = frag.get("end")
+                
+                if start is None or end is None:
+                    valid_fragments.append(frag)
+                    continue
+                    
+                # Extraemos cómo se veía el fragmento antes de la edición
+                frag_text = old_text[start:end]
+                
+                # Buscamos la nueva ubicación aproximada partiendo de la ubicación vieja
+                new_start = dmp.match_main(new_text, frag_text, start)
+                
+                if new_start != -1:
+                    # El algoritmo encontró el fragmento. Actualizamos índices.
+                    frag["start"] = new_start
+                    frag["end"] = new_start + len(frag_text)
+                    valid_fragments.append(frag)
+                else:
+                    # El usuario borró u alteró completamente esta frase.
+                    # Al no agregarlo a valid_fragments, se elimina de la EDD silenciosamente.
+                    # (Opcional: Podrías loggearlo o marcarlo como frag["orphan"] = True)
+                    print(f"⚠️ Fragmento eliminado automáticamente en el código '{code_name}' por edición destructiva.")
+                    
+            # Guardamos la lista purgada y actualizada en la EDD
+            self.codes_dict[code_name]["fragments"][doc_name] = valid_fragments
