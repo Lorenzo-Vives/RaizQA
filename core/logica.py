@@ -103,6 +103,10 @@ class ControladorLogico(QObject):
     def req_add_code(self, code_name, hexcolor, memo):
         if not self.current_project: return
         self.current_project.add_code(code_name, hexcolor, memo)
+
+        if memo and hasattr(self.current_project, 'memo_manager'):
+            self.current_project.memo_manager.add_or_update_memo(code_name, memo)
+
         self.current_project.save_edds()
         self.edds_updated.emit(self.current_project.codes_dict, self.current_project.themes_dict)
 

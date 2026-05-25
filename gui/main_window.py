@@ -14,6 +14,8 @@ from docx import Document
 
 from gui.widgets.local_search import LocalSearchWidget
 from gui.widgets.document_editor import DocumentEditorController
+from gui.widgets.actions_panel import ActionsPanelWidget
+
 from gui.dialogs.memo_dialog import MemoDialog
 from gui.dialogs.fragments_dialog import CodeFragmentsDialog
 from gui.dialogs.diary_dialog import DiaryDialog
@@ -23,6 +25,8 @@ from gui.dialogs.wordcloud_dialog import WordCloudDialog
 from gui.dialogs.themes_categories_dialog import ThemesCategoriesDialog
 from gui.dialogs.themes_analysis_dialog import ThemesAnalysisDialog
 from gui.dialogs.case_study_dialog import CaseStudyDialog
+from gui.dialogs.new_code_dialog import NewCodeDialog
+
 from gui.document_tree import DocumentTree
 from gui.code_tree import CodeTree
 from gui.image_viewer import ImageDocumentViewer
@@ -198,121 +202,35 @@ class RaizQAGUI(QMainWindow):
         content_wrapper_layout.setSpacing(10)
 
         # -------------------- ACCIONES --------------------
-        actions_frame = QFrame()
-        actions_frame.setObjectName("ActionsFrame")
-        actions_layout = QVBoxLayout(actions_frame)
-        actions_layout.setContentsMargins(0, 0, 0, 0)
-        actions_layout.setSpacing(6)
-
-        self.btn_working_dir = QPushButton("Seleccionar Working Directory")
-        self.btn_working_dir.clicked.connect(self.select_working_dir)
-
-        self.btn_create = QPushButton("Crear Proyecto")
-        self.btn_create.clicked.connect(self.create_project)
-
-        self.btn_open = QPushButton("Abrir Proyecto")
-        self.btn_open.clicked.connect(self.open_project)
-
-        self.btn_import_doc = QPushButton("Importar Archivo")
-        self.btn_import_doc.clicked.connect(self.import_file)
-
-        self.btn_save = QPushButton("💾 Guardar Proyecto")
-        self.btn_save.clicked.connect(self.save_project)
-
-        self.btn_view_codes = QPushButton("📚 Ver Códigos")
-        self.btn_view_codes.clicked.connect(self.open_code_viewer)
-
-        self.btn_add_code = QPushButton("Agregar código")
-        self.btn_add_code.clicked.connect(self.add_code_from_toolbar)
-
-        self.btn_themes_categories = QPushButton("Temas y categorías")
-        self.btn_themes_categories.clicked.connect(self.open_themes_categories)
-
-        self.btn_export_codes = QPushButton("Exportar libro de códigos")
-        self.btn_export_codes.clicked.connect(self.export_code_tree)
-
-        self.btn_export_fragments = QPushButton("Exportar fragmentos")
-        self.btn_export_fragments.clicked.connect(self.export_code_fragments)
-
-        self.btn_compare = QPushButton("Comparar documentos")
-        self.btn_compare.clicked.connect(self.open_compare_dialog)
-
-        self.btn_code_matrix = QPushButton("Code Matrix Browser")
-        self.btn_code_matrix.clicked.connect(self.open_code_matrix)
-
-        self.btn_wordcloud = QPushButton("Nube de palabras")
-        self.btn_wordcloud.clicked.connect(self.open_wordcloud_dialog)
-
-        self.btn_themes_analysis = QPushButton("Analisis de temas")
-        self.btn_themes_analysis.clicked.connect(self.open_themes_analysis)
-
-        self.btn_case_study = QPushButton("Estudio de casos")
-        self.btn_case_study.clicked.connect(self.open_case_study)
-
-        self.btn_export_diary = QPushButton("Exportar diario")
-        self.btn_export_diary.clicked.connect(self.export_diary)
-
-        self.btn_toggle_theme = QPushButton("☀️")
-        self.btn_toggle_theme.clicked.connect(self.toggle_theme)
-
-        self.btn_diary = QPushButton("📓 Diario de codificación")
-        self.btn_diary.clicked.connect(self.open_diary)
-
-        self.btn_nav_home = QPushButton("Inicio")
-        self.btn_nav_codes = QPushButton("Códigos")
-        self.btn_nav_analysis = QPushButton("Análisis")
-
-        nav_row = QHBoxLayout()
-        nav_row.setSpacing(8)
-        for btn in (self.btn_nav_home, self.btn_nav_codes, self.btn_nav_analysis, self.btn_toggle_theme):
-            btn.setCursor(Qt.PointingHandCursor)
-            btn.setMinimumHeight(30)
-            btn.setProperty("navButton", True)
-            if btn is not self.btn_toggle_theme:
-                btn.setCheckable(True)
-            nav_row.addWidget(btn)
-        nav_row.addStretch()
-        actions_layout.addLayout(nav_row)
-
-        def add_action_row(target_layout, buttons):
-            row = QHBoxLayout()
-            row.setSpacing(8)
-            for btn in buttons:
-                btn.setCursor(Qt.PointingHandCursor)
-                btn.setMinimumHeight(32)
-                btn.setProperty("actionButton", True)
-                row.addWidget(btn)
-            row.addStretch()
-            target_layout.addLayout(row)
-
-        self.actions_home = QWidget()
-        home_layout = QVBoxLayout(self.actions_home)
-        home_layout.setContentsMargins(0, 0, 0, 0)
-        home_layout.setSpacing(6)
-        add_action_row(home_layout, [self.btn_working_dir, self.btn_create, self.btn_open, self.btn_import_doc])
-
-        self.actions_codes = QWidget()
-        codes_layout = QVBoxLayout(self.actions_codes)
-        codes_layout.setContentsMargins(0, 0, 0, 0)
-        codes_layout.setSpacing(6)
-        add_action_row(codes_layout, [self.btn_add_code, self.btn_view_codes, self.btn_themes_categories, self.btn_export_codes, self.btn_export_fragments, self.btn_diary, self.btn_export_diary])
-
-        self.actions_analysis = QWidget()
-        analysis_layout = QVBoxLayout(self.actions_analysis)
-        analysis_layout.setContentsMargins(0, 0, 0, 0)
-        analysis_layout.setSpacing(6)
-        add_action_row(analysis_layout, [self.btn_compare, self.btn_code_matrix, self.btn_wordcloud, self.btn_themes_analysis, self.btn_case_study])
-
-        actions_layout.addWidget(self.actions_home)
-        actions_layout.addWidget(self.actions_codes)
-        actions_layout.addWidget(self.actions_analysis)
-
-        self.btn_nav_home.clicked.connect(lambda: self._set_actions_view("home"))
-        self.btn_nav_codes.clicked.connect(lambda: self._set_actions_view("codes"))
-        self.btn_nav_analysis.clicked.connect(lambda: self._set_actions_view("analysis"))
-        self._set_actions_view("home")
-
-        content_wrapper_layout.addWidget(actions_frame)
+        self.actions_panel = ActionsPanelWidget(self)
+        
+        # Conexiones Inicio
+        self.actions_panel.sig_working_dir.connect(self.select_working_dir)
+        self.actions_panel.sig_create_project.connect(self.create_project)
+        self.actions_panel.sig_open_project.connect(self.open_project)
+        self.actions_panel.sig_import_doc.connect(self.import_file)
+        
+        # Conexiones Códigos
+        self.actions_panel.sig_add_code.connect(self.add_code_from_toolbar)
+        self.actions_panel.sig_view_codes.connect(self.open_code_viewer)
+        self.actions_panel.sig_themes_categories.connect(self.open_themes_categories)
+        self.actions_panel.sig_diary.connect(self.open_diary)
+        
+        # Conexiones Exportaciones (Menú Desplegable)
+        self.actions_panel.sig_export_code_tree.connect(self.export_code_tree)
+        self.actions_panel.sig_export_fragments.connect(self.export_code_fragments)
+        self.actions_panel.sig_export_diary.connect(self.export_diary)
+        
+        # Conexiones Análisis
+        self.actions_panel.sig_compare.connect(self.open_compare_dialog)
+        self.actions_panel.sig_code_matrix.connect(self.open_code_matrix)
+        self.actions_panel.sig_wordcloud.connect(self.open_wordcloud_dialog)
+        self.actions_panel.sig_themes_analysis.connect(self.open_themes_analysis)
+        self.actions_panel.sig_case_study.connect(self.open_case_study)
+        
+        self.actions_panel.sig_toggle_theme.connect(self.toggle_theme)
+        
+        content_wrapper_layout.addWidget(self.actions_panel)
 
         # -------------------- CONTENIDO PRINCIPAL --------------------
         content_frame = QFrame()
@@ -539,14 +457,6 @@ class RaizQAGUI(QMainWindow):
         for widget in self._titlebar_drag_widgets:
             widget.installEventFilter(self)
 
-    def _set_actions_view(self, view_name):
-        self.actions_home.setVisible(view_name == "home")
-        self.actions_codes.setVisible(view_name == "codes")
-        self.actions_analysis.setVisible(view_name == "analysis")
-        self.btn_nav_home.setChecked(view_name == "home")
-        self.btn_nav_codes.setChecked(view_name == "codes")
-        self.btn_nav_analysis.setChecked(view_name == "analysis")
-
     def toggle_maximize(self):
         if self.isMaximized():
             self.showNormal()
@@ -749,8 +659,8 @@ class RaizQAGUI(QMainWindow):
             app.setPalette(palette)
         self.setPalette(palette)
 
-        if hasattr(self, "btn_toggle_theme"):
-            self.btn_toggle_theme.setText("🌙" if self.is_dark_mode else "☀️")
+        if hasattr(self, "actions_panel"):
+            self.actions_panel.update_theme_icon(self.is_dark_mode)
 
         base_styles = f"""
             QMainWindow {{
@@ -1109,20 +1019,8 @@ class RaizQAGUI(QMainWindow):
             QMessageBox.information(self, "Diario", "Abre o crea un proyecto para usar el diario.")
             return
 
-        try:
-            diary_text = self.current_project.load_diary()
-        except Exception as exc:
-            QMessageBox.critical(self, "Diario", f"No se pudo cargar el diario:\n{exc}")
-            diary_text = ""
-
-        dialog = DiaryDialog(diary_text, parent=self)
-        if dialog.exec() == QDialog.Accepted:
-            new_text = dialog.get_text()
-            try:
-                self.current_project.save_diary(new_text)
-                QMessageBox.information(self, "Diario", "Diario guardado correctamente.")
-            except Exception as exc:
-                QMessageBox.critical(self, "Diario", f"No se pudo guardar el diario:\n{exc}")
+        dialog = DiaryDialog(self.current_project.diary_manager, parent=self)
+        dialog.exec()
 
     # -------------------- FUNCIONES NUEVAS --------------------
     def _invoke_local_search(self):
@@ -1348,16 +1246,15 @@ class RaizQAGUI(QMainWindow):
         if not self.current_project:
             QMessageBox.warning(self, "Exportar diario", "Primero abre o crea un proyecto.")
             return
-
-        diary_text = ""
         try:
-            diary_text = self.current_project.load_diary() or ""
+            entries = self.current_project.diary_manager.get_entries()
         except Exception as exc:
             QMessageBox.critical(self, "Exportar diario", f"No se pudo leer el diario:\n{exc}")
             return
 
         default_dir = self.working_dir or os.getcwd()
-        default_path = os.path.join(default_dir, f"{self.current_project.name}_diario.docx") if self.current_project else os.path.join(default_dir, "diario.docx")
+        default_path = os.path.join(default_dir, f"{self.current_project.name}_diario.docx")
+        
         path, _ = QFileDialog.getSaveFileName(
             self,
             "Exportar diario a Word",
@@ -1367,8 +1264,8 @@ class RaizQAGUI(QMainWindow):
         if not path:
             return
 
-        # Emitir señal al Backend
-        self.signal_req_export_diary.emit(diary_text, self.current_project.name, path)
+        # Emitimos la señal pasando la lista de 'entries'
+        self.signal_req_export_diary.emit(entries, self.current_project.name, path)
 
     def handle_export_success(self, export_type, path):
         QMessageBox.information(self, f"Exportar {export_type}", f"{export_type} exportado exitosamente en:\n{path}")
@@ -1859,7 +1756,6 @@ class RaizQAGUI(QMainWindow):
                 text = self.current_project.read_document(self.current_doc)
                 self.text_area.setPlainText(text)
                 
-                # 👇 ¡ESTA ES LA LÍNEA QUE FALTA PARA QUE APAREZCA EL BOTÓN! 👇
                 self.doc_editor_controller.load_document(self.current_doc, text)
         else:
             self.text_area.clear()
@@ -2076,22 +1972,18 @@ class RaizQAGUI(QMainWindow):
             code_names.append(self._code_item_name(iterator.value()))
             iterator += 1
         if not code_names:
-            QMessageBox.warning(self, "Subcodigo", "Primero crea un codigo principal.")
+            QMessageBox.warning(self, "Subcódigo", "Primero crea un código principal.")
             return
 
-        parent_name, ok = QInputDialog.getItem(self, "Subcodigo", "Selecciona codigo padre:", code_names, 0, False)
+        parent_name, ok = QInputDialog.getItem(self, "Subcódigo", "Selecciona código padre:", code_names, 0, False)
         if not ok or not parent_name:
-            return
-
-        sub_label, ok = QInputDialog.getText(self, "Nuevo Subcodigo", "Nombre del subcodigo:")
-        if not ok or not sub_label:
             return
 
         selection = image_selection or self._image_selection_payload()
         has_selection = bool(selection and selection.get("rect"))
         note = self._prompt_image_note(
             "Nuevo fragmento (imagen)",
-            "Descripcion del fragmento (opcional):",
+            "Descripción del fragmento (opcional):",
             default_text="Zona de imagen" if has_selection else "Imagen completa",
         )
         if note is None:
@@ -2099,64 +1991,70 @@ class RaizQAGUI(QMainWindow):
 
         parent_item = self.find_tree_item(parent_name)
         if parent_item:
-            self.create_new_code("", None, None, parent_item, sub_label, is_image=True, note=note, image_selection=selection)
+            self.create_new_code("", None, None, parent_item, is_image=True, note=note, image_selection=selection)
 
     def add_code_from_toolbar(self):
         self.prompt_add_code()
 
     def prompt_add_code(self, parent_item=None):
         if not self.current_project:
-            QMessageBox.warning(self, "Agregar codigo", "Primero abre o crea un proyecto.")
+            QMessageBox.warning(self, "Agregar código", "Primero abre o crea un proyecto.")
             return
 
-        # Backend maneja todos los códigos planos ahora mismo por simpleza
-        prompt_title = "Agregar codigo"
-        prompt_label = "Nombre del codigo:"
-        code_label, ok = QInputDialog.getText(self, prompt_title, prompt_label)
-        if not ok:
+        # Calcular el color sugerido
+        default_color = self.COLOR_PALETTE[self._color_index % len(self.COLOR_PALETTE)][1]
+        
+        # Abrir ventana unificada
+        dialog = NewCodeDialog(self.COLOR_PALETTE, default_color=default_color, parent=self)
+        if dialog.exec() != QDialog.Accepted:
             return
 
-        code_label = (code_label or "").strip()
+        code_label, color_hex, memo = dialog.get_data()
+
         if not code_label:
-            QMessageBox.warning(self, "Agregar codigo", "El nombre del codigo no puede quedar vacio.")
+            QMessageBox.warning(self, "Agregar código", "El nombre del código no puede quedar vacío.")
             return
 
         if code_label in self.codes_dict:
-            QMessageBox.warning(self, "Agregar codigo", "Ya existe un codigo con ese nombre.")
+            QMessageBox.warning(self, "Agregar código", "Ya existe un código con ese nombre.")
             return
 
-        color_hex = self.ask_color_from_palette(self.next_palette_color())
+        self._color_index += 1
         
-        # Peticion MVC
-        self.signal_req_add_code.emit(code_label, color_hex, "")
+        # Emitir señal al backend con el memo incluido
+        self.signal_req_add_code.emit(code_label, color_hex, memo)
+
 
     def create_new_code(self, selected_text, start, end, parent_item=None, code_label=None, is_image=False, note=None, image_selection=None):
         if not self.current_doc:
-            QMessageBox.warning(self, "Nuevo codigo", "Selecciona un documento antes de codificar.")
+            QMessageBox.warning(self, "Nuevo código", "Selecciona un documento antes de codificar.")
             return
-
-        # (Eliminamos el QMessageBox que bloqueaba is_image)
 
         if not is_image and (start is None or end is None or start == end):
             return
 
+        # Calcular el color sugerido
+        default_color = self.COLOR_PALETTE[self._color_index % len(self.COLOR_PALETTE)][1]
+        
+        # Abrir ventana unificada (si es "in vivo", code_label ya trae un texto sugerido)
+        dialog = NewCodeDialog(self.COLOR_PALETTE, default_name=code_label or "", default_color=default_color, parent=self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+
+        code_label, color_hex, memo = dialog.get_data()
+
         if not code_label:
-            code_label, ok = QInputDialog.getText(self, "Nuevo Codigo", "Nombre del codigo:")
-            if not ok or not code_label:
-                return
-        code_label = code_label.strip()
-        if not code_label:
-            QMessageBox.warning(self, "Nuevo codigo", "El nombre del codigo no puede quedar vacio.")
+            QMessageBox.warning(self, "Nuevo código", "El nombre del código no puede quedar vacío.")
             return
             
         if code_label in self.codes_dict:
-            QMessageBox.warning(self, "Nuevo codigo", "Ya existe un codigo con ese nombre. Usa 'Agregar a codigo existente'.")
+            QMessageBox.warning(self, "Nuevo código", "Ya existe un código con ese nombre. Usa 'Agregar a código existente'.")
             return
 
-        color_hex = self.ask_color_from_palette(self.next_palette_color())
+        self._color_index += 1
 
         # 1. Crear el código en el backend
-        self.signal_req_add_code.emit(code_label, color_hex, "")
+        self.signal_req_add_code.emit(code_label, color_hex, memo)
         
         # 2. Construir el paquete de datos del fragmento
         if is_image and image_selection:
@@ -2302,13 +2200,9 @@ class RaizQAGUI(QMainWindow):
         if not ok or not parent_name:
             return
 
-        sub_label, ok = QInputDialog.getText(self, "Nuevo Subcódigo", "Nombre del subcódigo:")
-        if not ok or not sub_label:
-            return
-
         parent_item = self.find_tree_item(parent_name)
         if parent_item:
-            self.create_new_code(selected_text, start, end, parent_item, sub_label)
+            self.create_new_code(selected_text, start, end, parent_item=parent_item)
 
     def find_tree_item(self, code_name):
         iterator = QTreeWidgetItemIterator(self.code_tree)

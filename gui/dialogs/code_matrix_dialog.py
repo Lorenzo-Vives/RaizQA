@@ -100,13 +100,11 @@ class CodeMatrixDialog(QDialog):
         self.frequency_table = self._new_table()
         self.heatmap_table = self._new_table()
         self.cooccurrence_table = self._new_table()
-        self.concurrence_table = self._new_table()
 
         self.tabs.addTab(self.presence_table, "Presencia 0/1")
         self.tabs.addTab(self.frequency_table, "Frecuencia")
         self.tabs.addTab(self.heatmap_table, "Heatmap")
         self.tabs.addTab(self.cooccurrence_table, "Co-ocurrencia (aparecen juntos)")
-        self.tabs.addTab(self.concurrence_table, "Concurrencia (aparecen simultaneamente)")
         layout.addWidget(self.tabs, 1)
 
         self._apply_theme()
@@ -252,14 +250,12 @@ class CodeMatrixDialog(QDialog):
         code_rows, doc_cols, frequency = self._frequency_matrix(active_docs)
         presence = [[1 if value > 0 else 0 for value in row] for row in frequency]
         relation_labels, cooccurrence = self._cooccurrence_matrix(active_docs, code_rows)
-        _, concurrence = self._concurrence_matrix(active_docs, code_rows)
 
         self._fill_table(self.presence_table, code_rows, doc_cols, presence, show_zero=True)
         self._fill_table(self.frequency_table, code_rows, doc_cols, frequency, show_zero=True)
         self._fill_table(self.heatmap_table, code_rows, doc_cols, frequency, heatmap=True, show_zero=True)
         self._fill_table(self.cooccurrence_table, relation_labels, relation_labels, cooccurrence, heatmap=True, show_zero=True)
-        self._fill_table(self.concurrence_table, relation_labels, relation_labels, concurrence, heatmap=True, show_zero=True)
-        self._update_summary(active_docs, frequency, presence, cooccurrence, concurrence)
+        self._update_summary(active_docs, frequency, presence, cooccurrence)
 
     def _all_tables(self):
         return [
@@ -267,7 +263,6 @@ class CodeMatrixDialog(QDialog):
             self.frequency_table,
             self.heatmap_table,
             self.cooccurrence_table,
-            self.concurrence_table,
         ]
 
     def _code_names(self):
@@ -451,18 +446,17 @@ class CodeMatrixDialog(QDialog):
         brightness = (background.red() * 299 + background.green() * 587 + background.blue() * 114) / 1000
         return QColor("#111111" if brightness > 155 else "#f5f5f5")
 
-    def _update_summary(self, active_docs, frequency, presence, cooccurrence, concurrence):
+    def _update_summary(self, active_docs, frequency, presence, cooccurrence):
         total_freq = sum(sum(row) for row in frequency)
         active_cells = sum(1 for row in presence for value in row if value)
         co_total = self._upper_triangle_sum(cooccurrence)
-        con_total = self._upper_triangle_sum(concurrence)
         chosen = ", ".join(active_docs[:3])
         if len(active_docs) > 3:
             chosen += f" (+{len(active_docs) - 3})"
         self.lbl_summary.setText(
             f"Documentos: {len(active_docs)} [{chosen}] | Codigos: {len(frequency)} | "
             f"Fragmentos codificados: {total_freq} | Presencias: {active_cells} | "
-            f"Co-ocurrencias: {co_total} | Concurrencias: {con_total}"
+            f"Co-ocurrencias: {co_total}"
         )
 
     def _upper_triangle_sum(self, matrix):

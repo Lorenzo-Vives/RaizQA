@@ -7,6 +7,7 @@ from diff_match_patch import diff_match_patch
 
 from core.memos import MemoManager
 from core.pointer_manager import PointerManager
+from core.diary_manager import DiaryManager
 
 
 class Project:
@@ -24,6 +25,7 @@ class Project:
         self.metadata_path = os.path.join(self.path, "metadata.json")
         self.state_path = os.path.join(self.path, "project_data.json")
         self.project_path = self.path  # alias por compatibilidad
+        self.diary_manager = DiaryManager(self.path)
         self.memo_manager = MemoManager(self.path)
         
         # Nuevas Estructuras de Datos (EDDs)
@@ -70,21 +72,7 @@ class Project:
     # DIARIO DE CODIFICACIÓN
     # ------------------------------------------------------------------
     def get_diary_path(self):
-        return os.path.join(self.path, "diario.txt")
-
-    def load_diary(self):
-        diary_path = self.get_diary_path()
-        if not os.path.exists(diary_path):
-            return ""
-        with open(diary_path, "r", encoding="utf-8") as f:
-            return f.read()
-
-    def save_diary(self, text):
-        diary_path = self.get_diary_path()
-        os.makedirs(self.path, exist_ok=True)
-        with open(diary_path, "w", encoding="utf-8") as f:
-            f.write(text or "")
-
+        return os.path.join(self.path, "diario.json")
     # ------------------------------------------------------------------
     # DOCUMENTOS
     # ------------------------------------------------------------------
@@ -390,7 +378,6 @@ class Project:
                 else:
                     # El usuario borró u alteró completamente esta frase.
                     # Al no agregarlo a valid_fragments, se elimina de la EDD silenciosamente.
-                    # (Opcional: Podrías loggearlo o marcarlo como frag["orphan"] = True)
                     print(f"⚠️ Fragmento eliminado automáticamente en el código '{code_name}' por edición destructiva.")
                     
             # Guardamos la lista purgada y actualizada en la EDD

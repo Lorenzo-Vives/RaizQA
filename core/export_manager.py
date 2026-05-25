@@ -1,15 +1,45 @@
 import os
+import docx.shared
 from docx import Document
+from datetime import datetime
 
 class ExportManager:
     """Maneja la exportación de datos del proyecto (Diario, Excel, etc) puro, sin dependencias GUI."""
 
     @staticmethod
-    def export_diary(diary_text, project_name, export_path):
-        """Exporta el diario a un documento Word."""
+    def export_diary(entries, project_name, export_path):
+        """Exporta el diario estructurado (lista de diccionarios) a un documento Word."""
         doc = Document()
         doc.add_heading(f"Diario de codificación - {project_name}", level=1)
-        doc.add_paragraph(diary_text if diary_text.strip() else "(Diario vacío)")
+
+        if not entries:
+            doc.add_paragraph("(Diario vacío)")
+        else:
+            for entry in entries:
+                # 1. Parsear y formatear la fecha
+                date_str = entry.get("date", "")
+                try:
+                    dt = datetime.fromisoformat(date_str)
+                    date_formatted = dt.strftime("%d/%m/%Y a las %H:%M")
+                except ValueError:
+                    date_formatted = date_str  # Fallback por si la fecha está corrupta o en otro formato
+
+                author = entry.get("author", "Desconocido")
+                message = entry.get("message", "")
+
+                # 2. Agregar encabezado de la entrada (Autor y Fecha)
+                p_header = doc.add_paragraph()
+                run = p_header.add_run(f"👤 {author} - {date_formatted}")
+                run.bold = True
+
+                # 3. Agregar el cuerpo del mensaje
+                doc.add_paragraph(message)
+                
+                # 4. Agregar línea separadora sutil
+                p_divider = doc.add_paragraph()
+                run_divider = p_divider.add_run("_" * 50)
+                run_divider.font.color.rgb = docx.shared.RGBColor(180, 180, 180) # Gris claro
+
         doc.save(export_path)
 
     @staticmethod
