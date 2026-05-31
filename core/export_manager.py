@@ -1,4 +1,5 @@
 import os
+import shutil
 import docx.shared
 from docx import Document
 from datetime import datetime
@@ -156,3 +157,121 @@ class ExportManager:
         worksheet.column_dimensions["B"].width = 28
         worksheet.column_dimensions["C"].width = 100
         worksheet.column_dimensions["D"].width = 48
+
+    @staticmethod
+    def export_project_to_rqa(project_path: str, export_path: str) -> str:
+        """
+        Comprime la carpeta entera del proyecto en un archivo .rqa.
+        Si la export_path no termina en .rqa, se le añade.
+        """
+        if not export_path.lower().endswith(".rqa"):
+            export_path += ".rqa"
+            
+        base_name = export_path[:-4] if export_path.lower().endswith(".rqa") else export_path
+        
+        zip_path = shutil.make_archive(base_name, 'zip', project_path)
+        
+        if os.path.exists(export_path):
+            os.remove(export_path) 
+            
+        shutil.move(zip_path, export_path)
+        
+        return export_path
+
+    @staticmethod
+    def export_exchange_to_rex(project, selected_docs, selected_codes, options, export_path):
+        """
+        Exporta los documentos, códigos, temas y memos seleccionados a un archivo
+        de intercambio con formato .rex.
+
+        Args:
+            project (Project): El proyecto actual de RaizQA del cual extraer los datos.
+            selected_docs (list): Lista de nombres de documentos a exportar.
+            selected_codes (list): Lista de nombres de códigos a exportar.
+            options (dict): Diccionario con opciones extra (como include_memos y code_themes).
+            export_path (str): Ruta donde se guardará el archivo .rex generado.
+        """
+        import json
+        import zipfile
+        import tempfile
+        
+        include_memos = options.get("include_memos", False)
+        
+        if not export_path.lower().endswith(".rex"):
+            export_path += ".rex"
+            
+        with tempfile.TemporaryDirectory() as temp_dir:
+            docs_dir = os.path.join(temp_dir, "documentos")
+            os.makedirs(docs_dir)
+            
+            # Copy documents
+            for doc in selected_docs:
+                src_path = os.path.join(project.documents_path, doc)
+                if os.path.exists(src_path):
+                    shutil.copy2(src_path, os.path.join(docs_dir, doc))
+                    
+            # Filter codes_dict
+            filtered_codes = {}
+            for code in selected_codes:
+                if code in project.codes_dict:
+                    code_data = project.codes_dict[code].copy()
+                    code_data["fragments"] = {}
+                    for doc, frags in project.codes_dict[code].get("fragments", {}).items():
+                        if doc in selected_docs:
+                            code_data["fragments"][doc] = frags
+                    filtered_codes[code] = code_data
+                    
+            # Filter themes using the ones passed from UI if available
+            code_themes = options.get("code_themes", [])
+            filtered_themes = {}
+            if code_themes:
+                for theme in code_themes:
+                    theme_name = theme.get("name", "Tema sin nombre")
+                    theme_codes = [c for c in theme.get("codes", []) if c in selected_codes]
+                    if theme_codes:
+                        filtered_themes[theme_name] = {
+                            "memo": "",  # Or you could fetch the memo from project.themes_dict if it exists
+                            "codes": theme_codes
+                        }
+            else:
+                for theme_name, theme_data in project.themes_dict.items():
+                    theme_codes = [c for c in theme_data.get("codes", []) if c in selected_codes]
+                    if theme_codes:
+                        filtered_themes[theme_name] = {
+                            "memo": theme_data.get("memo", ""),
+                            "codes": theme_codes
+                        }
+                    
+            # Filter memos_dict
+            filtered_memos = {}
+            if include_memos:
+                for memo_id, memo_text in project.memos_dict.items():
+                    target = memo_id
+                    if target in selected_docs or target in selected_codes:
+                        filtered_memos[memo_id] = memo_text
+                        
+            project_data = {
+                "codes_dict": filtered_codes,
+                "themes_dict": filtered_themes,
+                "memos_dict": filtered_memos,
+            }
+            
+            with open(os.path.join(temp_dir, "project_data.json"), "w", encoding="utf-8") as f:
+                json.dump(project_data, f, indent=4, ensure_ascii=False)
+                
+            metadata = {
+                "name": project.name,
+                "documents": selected_docs,
+                "is_exchange": True
+            }
+            with open(os.path.join(temp_dir, "metadata.json"), "w", encoding="utf-8") as f:
+                json.dump(metadata, f, indent=4, ensure_ascii=False)
+                
+            base_name = export_path[:-4]
+            zip_path = shutil.make_archive(base_name, 'zip', temp_dir)
+            
+            if os.path.exists(export_path):
+                os.remove(export_path)
+            shutil.move(zip_path, export_path)
+            
+        return export_path

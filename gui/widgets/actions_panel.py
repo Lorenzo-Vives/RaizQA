@@ -27,7 +27,12 @@ class ActionsPanelWidget(QFrame):
     sig_working_dir = Signal()
     sig_create_project = Signal()
     sig_open_project = Signal()
+    sig_merge_projects = Signal()
     sig_import_doc = Signal()
+    sig_export_rqa = Signal()
+    sig_import_rqa = Signal()
+    sig_export_rex = Signal()
+    sig_import_rex = Signal()
 
     sig_add_code = Signal()
     sig_view_codes = Signal()
@@ -130,18 +135,53 @@ class ActionsPanelWidget(QFrame):
         layout.setSpacing(6)
 
         btn_working_dir = QPushButton("Seleccionar Working Directory")
-        btn_create = QPushButton("Crear Proyecto")
-        btn_open = QPushButton("Abrir Proyecto")
+        
+        # --- BOTÓN DESPLEGABLE DE PROYECTO ---
+        self.btn_project = QPushButton("📁 Proyecto ▼")
+        project_menu = QMenu(self.btn_project)
+        
+        action_create = QAction("Nuevo proyecto...", self)
+        action_open = QAction("Abrir proyecto...", self)
+        action_merge = QAction("Combinar proyectos...", self)
+        action_export_rqa = QAction("Exportar proyecto (.rqa)...", self)
+        action_import_rqa = QAction("Importar proyecto (.rqa)...", self)
+        
+        action_create.triggered.connect(self.sig_create_project.emit)
+        action_open.triggered.connect(self.sig_open_project.emit)
+        action_merge.triggered.connect(self.sig_merge_projects.emit)
+        action_export_rqa.triggered.connect(self.sig_export_rqa.emit)
+        action_import_rqa.triggered.connect(self.sig_import_rqa.emit)
+        
+        project_menu.addAction(action_create)
+        project_menu.addAction(action_open)
+        project_menu.addSeparator()
+        project_menu.addAction(action_merge)
+        project_menu.addAction(action_import_rqa)
+        project_menu.addAction(action_export_rqa)
+        
+        self.btn_project.setMenu(project_menu)
+        
         btn_import_doc = QPushButton("Importar Archivo")
+        
+        self.btn_teamwork = QPushButton("Teamwork 🫂 ▼")
+        teamwork_menu = QMenu(self.btn_teamwork)
+        
+        action_export_rex = QAction("Exportar archivo de intercambio (.rex)...", self)
+        action_import_rex = QAction("Importar archivo de intercambio (.rex)...", self)
+        
+        action_export_rex.triggered.connect(self.sig_export_rex.emit)
+        action_import_rex.triggered.connect(self.sig_import_rex.emit)
+        
+        teamwork_menu.addAction(action_export_rex)
+        teamwork_menu.addAction(action_import_rex)
+        self.btn_teamwork.setMenu(teamwork_menu)
 
         btn_working_dir.clicked.connect(self.sig_working_dir.emit)
-        btn_create.clicked.connect(self.sig_create_project.emit)
-        btn_open.clicked.connect(self.sig_open_project.emit)
         btn_import_doc.clicked.connect(self.sig_import_doc.emit)
 
         self._add_action_row(
             layout,
-            [btn_working_dir, btn_create, btn_open, btn_import_doc]
+            [btn_working_dir, self.btn_project, btn_import_doc, self.btn_teamwork]
         )
 
     def _setup_codes_view(self):

@@ -26,6 +26,7 @@ from gui.dialogs.themes_categories_dialog import ThemesCategoriesDialog
 from gui.dialogs.themes_analysis_dialog import ThemesAnalysisDialog
 from gui.dialogs.case_study_dialog import CaseStudyDialog
 from gui.dialogs.new_code_dialog import NewCodeDialog
+from gui.dialogs.loading_dialog import LoadingDialog
 
 from gui.document_tree import DocumentTree
 from gui.code_tree import CodeTree
@@ -43,6 +44,12 @@ class RaizQAGUI(QMainWindow):
     signal_req_export_code_tree = Signal(list, str)
     signal_req_export_code_fragments = Signal(list, list, str)
     signal_req_set_project = Signal(object)
+    
+    signal_req_export_project = Signal(str)
+    signal_req_import_project = Signal(str, str)
+    signal_req_export_exchange = Signal(list, list, dict, str)
+    signal_req_import_exchange = Signal(str, dict)
+    signal_req_merge_projects = Signal(str, dict)
 
     # SEÑALES CRUD EDDs
     signal_req_add_code = Signal(str, str, str)
@@ -209,7 +216,12 @@ class RaizQAGUI(QMainWindow):
         self.actions_panel.sig_working_dir.connect(self.select_working_dir)
         self.actions_panel.sig_create_project.connect(self.create_project)
         self.actions_panel.sig_open_project.connect(self.open_project)
+        self.actions_panel.sig_merge_projects.connect(self.merge_projects)
         self.actions_panel.sig_import_doc.connect(self.import_file)
+        self.actions_panel.sig_export_rqa.connect(self.export_project_rqa)
+        self.actions_panel.sig_import_rqa.connect(self.import_project_rqa)
+        self.actions_panel.sig_export_rex.connect(self.export_project_rex)
+        self.actions_panel.sig_import_rex.connect(self.import_project_rex)
         
         # Conexiones Códigos
         self.actions_panel.sig_add_code.connect(self.add_code_from_toolbar)
@@ -449,6 +461,165 @@ class RaizQAGUI(QMainWindow):
         if hasattr(self, "action_toggle_theme"):
             self.action_toggle_theme.setText("Modo claro" if self.is_dark_mode else "Modo oscuro")
 
+    def export_project_rqa(self):
+        if not self.current_project:
+            QMessageBox.warning(self, "Exportar Proyecto", "Primero abre o crea un proyecto.")
+            return
+            
+        default_name = f"{self.current_project.name}.rqa"
+        default_path = os.path.join(self.working_dir or os.path.expanduser("~"), default_name)
+        
+        path, _ = QFileDialog.getSaveFileName(self, "Exportar Proyecto (.rqa)", default_path, "RaizQA Project (*.rqa)")
+        if not path:
+            return
+            
+        self.signal_req_export_project.emit(path)
+        self.actions_panel.btn_teamwork.setText("⏳ Exportando...")
+        self.actions_panel.btn_teamwork.setEnabled(False)
+        self._show_loading_dialog("Exportar Proyecto", "Comprimiendo y exportando proyecto, por favor espera...")
+
+    def import_project_rqa(self):
+        if not self.working_dir:
+            QMessageBox.warning(self, "Importar Proyecto", "Primero debes seleccionar un Working Directory (WD).")
+            return
+            
+        reply = QMessageBox.warning(
+            self, 
+            "Importar Proyecto", 
+            "El proyecto importado reemplazará cualquier proyecto existente con el mismo nombre en tu directorio de trabajo.\n\n¿Deseas continuar?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply != QMessageBox.Yes:
+            return
+            
+        path, _ = QFileDialog.getOpenFileName(self, "Importar Proyecto (.rqa)", self.working_dir, "RaizQA Project (*.rqa)")
+        if not path:
+            return
+            
+        self.signal_req_import_project.emit(path, self.working_dir)
+        self.actions_panel.btn_teamwork.setText("⏳ Importando...")
+        self.actions_panel.btn_teamwork.setEnabled(False)
+        self._show_loading_dialog("Importar Proyecto", "Extrayendo y cargando proyecto, por favor espera...")
+
+    def merge_projects(self):
+        if not self.working_dir or not self.current_project:
+            QMessageBox.warning(self, "Combinar Proyectos", "Primero debes abrir o crear un proyecto base.")
+            return
+            
+        path, _ = QFileDialog.getOpenFileName(self, "Combinar Proyecto (.rqa)", self.working_dir, "RaizQA Project (*.rqa)")
+        if not path:
+            return
+            
+        try:
+            import zipfile
+            import tempfile
+            import json
+            with tempfile.TemporaryDirectory() as temp_dir:
+                with zipfile.ZipFile(path, 'r') as zip_ref:
+                    zip_ref.extract("metadata.json", temp_dir)
+                with open(os.path.join(temp_dir, "metadata.json"), 'r', encoding='utf-8') as f:
+                    metadata = json.load(f)
+                    imported_name = metadata.get("name", "Desconocido")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"No se pudo leer el archivo .rqa:\\n{str(e)}")
+            return
+            
+        from gui.dialogs.merge_dialog import MergeDialog
+        dialog = MergeDialog(self.current_project.name, imported_name, self)
+        if dialog.exec():
+            settings = dialog.get_settings()
+            self.signal_req_merge_projects.emit(path, settings)
+            self.actions_panel.btn_project.setText("⏳ Combinando...")
+            self.actions_panel.btn_project.setEnabled(False)
+            self._show_loading_dialog("Combinar Proyectos", "Respaldando y combinando proyectos, por favor espera...")
+
+    def handle_project_merged(self):
+        self._close_loading_dialog()
+        self.actions_panel.btn_project.setText("📁 Proyecto ▼")
+        self.actions_panel.btn_project.setEnabled(True)
+        
+        QMessageBox.information(self, "Combinar Proyectos", "Los proyectos se combinaron exitosamente.")
+        
+        self.signal_req_set_project.emit(self.current_project)
+        self.load_project()
+
+    def export_project_rex(self):
+        if not self.current_project:
+            QMessageBox.warning(self, "Exportar Archivo", "Primero abre o crea un proyecto.")
+            return
+            
+        self._rebuild_doc_groups_from_tree()
+        from gui.dialogs.export_exchange_wizard import ExportExchangeWizard
+        wizard = ExportExchangeWizard(self.current_project, self.doc_groups, self.code_themes, self)
+        if wizard.exec():
+            data = wizard.get_export_data()
+            if not data["documents"] and not data["codes"]:
+                QMessageBox.warning(self, "Exportar Archivo", "No se seleccionó ningún dato para exportar.")
+                return
+                
+            path, _ = QFileDialog.getSaveFileName(self, "Guardar Archivo de Intercambio", self.current_project.name, "RaizQA Exchange (*.rex)")
+            if path:
+                options = {
+                    "include_memos": data["include_memos"],
+                    "code_themes": data["code_themes"]
+                }
+                self.signal_req_export_exchange.emit(data["documents"], data["codes"], options, path)
+                self.actions_panel.btn_teamwork.setText("⏳ Exportando...")
+                self.actions_panel.btn_teamwork.setEnabled(False)
+                self._show_loading_dialog("Exportar Exchange", "Comprimiendo y exportando archivo, por favor espera...")
+
+    def import_project_rex(self):
+        if not self.working_dir or not self.current_project:
+            QMessageBox.warning(self, "Importar Archivo", "Debes tener un proyecto abierto para importar un archivo de intercambio.")
+            return
+            
+        path, _ = QFileDialog.getOpenFileName(self, "Seleccionar Archivo de Intercambio", self.working_dir, "RaizQA Exchange (*.rex)")
+        if not path:
+            return
+            
+        try:
+            from core.import_manager import ImportManager
+            exchange_data = ImportManager.inspect_exchange_file(path)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"No se pudo leer el archivo de intercambio:\n{str(e)}")
+            return
+            
+        from gui.dialogs.import_exchange_wizard import ImportExchangeWizard
+        wizard = ImportExchangeWizard(self.current_project, exchange_data, self)
+        if wizard.exec():
+            import_data = wizard.get_import_data()
+            self.signal_req_import_exchange.emit(path, import_data)
+            self.actions_panel.btn_teamwork.setText("⏳ Importando...")
+            self.actions_panel.btn_teamwork.setEnabled(False)
+            self._show_loading_dialog("Importar Exchange", "Extrayendo y fusionando archivo de intercambio, por favor espera...")
+        
+    def handle_project_exported(self, path):
+        self._close_loading_dialog()
+        self.actions_panel.btn_teamwork.setText("Teamwork 🫂 ▼")
+        self.actions_panel.btn_teamwork.setEnabled(True)
+
+    def handle_project_imported(self, project_path):
+        self._close_loading_dialog()
+        self.actions_panel.btn_teamwork.setText("Teamwork 🫂 ▼")
+        self.actions_panel.btn_teamwork.setEnabled(True)
+        
+        project_name = os.path.basename(project_path)
+        self.current_project = Project(project_name, self.working_dir)
+        self.memo_manager = self.current_project.memo_manager
+        self.lbl_project.setText(f"Proyecto: {self.current_project.name}")
+        self.reset_project_state()
+        self.signal_req_set_project.emit(self.current_project)
+        self.load_project()
+
+    def _show_loading_dialog(self, title, message):
+        self.progress_dialog = LoadingDialog(title, message, self)
+        self.progress_dialog.show()
+        
+    def _close_loading_dialog(self):
+        if hasattr(self, 'progress_dialog') and self.progress_dialog:
+            self.progress_dialog.close()
+            self.progress_dialog = None
+
     def _setup_titlebar_drag(self):
         self._drag_pos = None
         self._titlebar_drag_widgets = [
@@ -608,6 +779,10 @@ class RaizQAGUI(QMainWindow):
         return code_item
 
     def handle_error(self, message):
+        self._close_loading_dialog()
+        if hasattr(self, 'actions_panel') and hasattr(self.actions_panel, 'btn_teamwork') and self.actions_panel.btn_teamwork.text().startswith("⏳"):
+            self.actions_panel.btn_teamwork.setText("Teamwork 🫂 ▼")
+            self.actions_panel.btn_teamwork.setEnabled(True)
         QMessageBox.critical(self, "Error del Backend", message)
 
     def _go_to_match(self, match):
@@ -1047,6 +1222,10 @@ class RaizQAGUI(QMainWindow):
         QMessageBox.information(self, f"Exportar {export_type}", f"{export_type} exportado exitosamente en:\n{path}")
 
     def handle_export_error(self, export_type, error_msg):
+        self._close_loading_dialog()
+        if export_type == "Proyecto .rqa":
+            self.actions_panel.btn_teamwork.setText("Teamwork 🫂 ▼")
+            self.actions_panel.btn_teamwork.setEnabled(True)
         QMessageBox.critical(self, f"Exportar {export_type}", f"No se pudo exportar {export_type}:\n{error_msg}")
 
 

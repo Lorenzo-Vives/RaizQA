@@ -2,7 +2,7 @@ from PySide6.QtCore import QObject, Signal
 
 from core.search_manager import SearchManager
 from core.export_manager import ExportManager
-from core.worker_objects import BuscadorWorker  
+from core.worker_objects import BuscadorWorker, ExportWorker, ImportWorker  
 
 class ControladorLogico(QObject):
     """
@@ -23,10 +23,15 @@ class ControladorLogico(QObject):
     edds_updated = Signal(dict, dict)    # Emite (codes_dict, themes_dict) cada vez que cambian
     error_occurred = Signal(str)         # Emite mensajes de error generales
 
+    project_exported = Signal(str)       # Emite la ruta donde se guardó el .rqa
+    project_imported = Signal(str)       # Emite la ruta de la carpeta del proyecto extraído
+    project_merged = Signal()            # Emite cuando la combinación finaliza
+
     def __init__(self):
         super().__init__()
         # Aquí vivirá el estado global (La instancia del proyecto activo)
         self.current_project = None
+        self._workers = set()
 
     # ==========================================
     # SLOTS/MÉTODOS (Interfaz Gráfica -> Backend)
@@ -39,12 +44,16 @@ class ControladorLogico(QObject):
              
         # 1. Instanciar el worker externo
         worker = BuscadorWorker(term, project, codes, memo_manager)
+        self._workers.add(worker)
         
         # 2. Conectar sus señales a los métodos internos de redirección
-        worker.signals.finished.connect(self._on_search_finished)
-        worker.signals.error.connect(self._on_search_error)
+        worker.signals.finished.connect(lambda res: self._handle_worker_finish(worker, self.search_completed, res))
+        worker.signals.error.connect(lambda err: self._handle_worker_finish(worker, self.search_failed, err))
         
         # 3. Ordenar al ThreadPool que lo ejecute en segundo plano
+        if not hasattr(self, 'threadpool'):
+            from PySide6.QtCore import QThreadPool
+            self.threadpool = QThreadPool.globalInstance()
         self.threadpool.start(worker)
 
     def req_export_diary(self, diary_text, project_name, export_path):
@@ -71,6 +80,89 @@ class ControladorLogico(QObject):
         except Exception as e:
             self.export_error.emit("Fragmentos de códigos", str(e))
 
+    def _handle_worker_finish(self, worker, signal_to_emit, *args):
+        self._workers.discard(worker)
+        signal_to_emit.emit(*args)
+        
+    def _handle_worker_error_with_type(self, worker, export_type, error_msg):
+        self._workers.discard(worker)
+        self.export_error.emit(export_type, error_msg)
+
+    def req_export_project(self, export_path):
+        """Petición asíncrona para empaquetar el proyecto actual en un .rqa."""
+        if not self.current_project: return
+        
+        worker = ExportWorker(self.current_project.path, export_path)
+        self._workers.add(worker)
+        
+        worker.signals.finished.connect(lambda path: self._handle_worker_finish(worker, self.project_exported, path))
+        worker.signals.error.connect(lambda e: self._handle_worker_error_with_type(worker, "Proyecto .rqa", e))
+        
+        if not hasattr(self, 'threadpool'):
+            from PySide6.QtCore import QThreadPool
+            self.threadpool = QThreadPool.globalInstance()
+            
+        self.threadpool.start(worker)
+
+    def req_import_project(self, rqa_path, dest_base_path):
+        """Petición asíncrona para desempaquetar un archivo .rqa."""
+        worker = ImportWorker(rqa_path, dest_base_path)
+        self._workers.add(worker)
+        
+        worker.signals.finished.connect(lambda path: self._handle_worker_finish(worker, self.project_imported, path))
+        worker.signals.error.connect(lambda e: self._handle_worker_finish(worker, self.error_occurred, e))
+        
+        if not hasattr(self, 'threadpool'):
+            from PySide6.QtCore import QThreadPool
+            self.threadpool = QThreadPool.globalInstance()
+            
+        self.threadpool.start(worker)
+
+    def req_export_exchange(self, docs, codes, options, export_path):
+        from core.worker_objects import ExportExchangeWorker
+        worker = ExportExchangeWorker(self.current_project, docs, codes, options, export_path)
+        self._workers.add(worker)
+        
+        worker.signals.finished.connect(lambda path: self._handle_worker_finish(worker, self.project_exported, path))
+        worker.signals.error.connect(lambda e: self._handle_worker_finish(worker, self.error_occurred, e))
+        
+        if not hasattr(self, 'threadpool'):
+            from PySide6.QtCore import QThreadPool
+            self.threadpool = QThreadPool.globalInstance()
+            
+        self.threadpool.start(worker)
+
+    def req_import_exchange(self, rex_path, import_data):
+        from core.worker_objects import ImportExchangeWorker
+        worker = ImportExchangeWorker(rex_path, self.current_project, import_data)
+        self._workers.add(worker)
+        
+        worker.signals.finished.connect(lambda path: self._handle_worker_finish(worker, self.project_imported, path))
+        worker.signals.error.connect(lambda e: self._handle_worker_finish(worker, self.error_occurred, e))
+        
+        if not hasattr(self, 'threadpool'):
+            from PySide6.QtCore import QThreadPool
+            self.threadpool = QThreadPool.globalInstance()
+            
+        self.threadpool.start(worker)
+
+    def req_merge_projects(self, rqa_path, settings):
+        """Petición asíncrona para combinar un proyecto .rqa en el actual."""
+        if not self.current_project: return
+        
+        from core.worker_objects import MergeWorker
+        worker = MergeWorker(self.current_project, rqa_path, settings)
+        self._workers.add(worker)
+        
+        worker.signals.finished.connect(lambda: self._handle_worker_finish(worker, self.project_merged))
+        worker.signals.error.connect(lambda e: self._handle_worker_finish(worker, self.error_occurred, e))
+        
+        if not hasattr(self, 'threadpool'):
+            from PySide6.QtCore import QThreadPool
+            self.threadpool = QThreadPool.globalInstance()
+            
+        self.threadpool.start(worker)
+
     # ==========================================
     # SLOTS/MÉTODOS (Gestión de EDDs)
     # ==========================================
@@ -82,7 +174,7 @@ class ControladorLogico(QObject):
             name = os.path.basename(project_path)
             base = os.path.dirname(project_path)
             self.current_project = Project(name, base)
-            self.current_project.load_edds()
+            self.current_project.load_project_data()
             self.project_loaded.emit(self.current_project)
             self.edds_updated.emit(self.current_project.codes_dict, self.current_project.themes_dict)
         except Exception as e:

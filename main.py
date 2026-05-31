@@ -19,6 +19,11 @@ class RaizQA:
         self.ventana.signal_req_export_diary.connect(self.logica.req_export_diary)
         self.ventana.signal_req_export_code_tree.connect(self.logica.req_export_code_tree)
         self.ventana.signal_req_export_code_fragments.connect(self.logica.req_export_code_fragments)
+        self.ventana.signal_req_export_project.connect(self.logica.req_export_project)
+        self.ventana.signal_req_import_project.connect(self.logica.req_import_project)
+        self.ventana.signal_req_export_exchange.connect(self.logica.req_export_exchange)
+        self.ventana.signal_req_import_exchange.connect(self.logica.req_import_exchange)
+        self.ventana.signal_req_merge_projects.connect(self.logica.req_merge_projects)
         
         # UI -> Backend (Gestión de Códigos y EDDs)
         self.ventana.signal_req_add_code.connect(self.logica.req_add_code)
@@ -38,6 +43,10 @@ class RaizQA:
         
         self.logica.export_success.connect(self.ventana.handle_export_success)
         self.logica.export_error.connect(self.ventana.handle_export_error)
+        
+        self.logica.project_exported.connect(self.ventana.handle_project_exported)
+        self.logica.project_imported.connect(self.ventana.handle_project_imported)
+        self.logica.project_merged.connect(self.ventana.handle_project_merged)
 
 # Asegura que el directorio raíz esté en sys.path (por si se ejecuta desde fuera)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
