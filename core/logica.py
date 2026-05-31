@@ -92,11 +92,17 @@ class ControladorLogico(QObject):
         """Sincroniza el proyecto abierto en la interfaz con el backend."""
         self.current_project = project
 
-    def req_save_project(self):
-        """Petición para guardar el estado de las EDDs."""
+    def req_save_all(self, state_data):
+        """Petición para guardar el estado completo del proyecto."""
         if not self.current_project: return
         try:
-            self.current_project.save_edds()
+            self.current_project.save_project_data(
+                documents=state_data.get("documents", []),
+                highlights=state_data.get("highlights", {}),
+                doc_groups=state_data.get("doc_groups"),
+                themes=state_data.get("themes"),
+                case_studies=state_data.get("case_studies")
+            )
         except Exception as e:
             self.error_occurred.emit(f"Error al guardar proyecto: {str(e)}")
 
@@ -107,25 +113,21 @@ class ControladorLogico(QObject):
         if memo and hasattr(self.current_project, 'memo_manager'):
             self.current_project.memo_manager.add_or_update_memo(code_name, memo)
 
-        self.current_project.save_edds()
         self.edds_updated.emit(self.current_project.codes_dict, self.current_project.themes_dict)
 
     def req_delete_code(self, code_name):
         if not self.current_project: return
         self.current_project.delete_code(code_name)
-        self.current_project.save_edds()
         self.edds_updated.emit(self.current_project.codes_dict, self.current_project.themes_dict)
         
     def req_update_code(self, old_name, new_name, hexcolor, memo):
         if not self.current_project: return
         self.current_project.update_code(old_name, new_name, hexcolor, memo)
-        self.current_project.save_edds()
         self.edds_updated.emit(self.current_project.codes_dict, self.current_project.themes_dict)
 
     def req_add_fragment(self, code_name, doc_name, fragment_data):
         if not self.current_project: return
         self.current_project.add_fragment(code_name, doc_name, fragment_data)
-        self.current_project.save_edds()
         self.edds_updated.emit(self.current_project.codes_dict, self.current_project.themes_dict)
 
     def req_update_document(self, doc_name, new_text):
@@ -135,10 +137,7 @@ class ControladorLogico(QObject):
             # 1. El proyecto actualiza el archivo y resincroniza los índices
             self.current_project.update_document_text(doc_name, new_text)
             
-            # 2. Guardamos la EDD (codes_dict) actualizada en disco (.json)
-            self.current_project.save_edds()
-            
-            # 3. Emitimos la señal para que la UI repinte los subrayados 
+            # 2. Emitimos la señal para que la UI repinte los subrayados 
             # en sus nuevas posiciones exactas.
             self.edds_updated.emit(self.current_project.codes_dict, self.current_project.themes_dict)
             

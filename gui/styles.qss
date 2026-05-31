@@ -1,0 +1,237 @@
+QMainWindow {{
+    background-color: {window_bg};
+    color: {text_fg};
+}}
+QLabel {{
+    color: {text_fg};
+}}
+QLabel#TopBrand {{
+    font-weight: 700;
+    padding-left: 2px;
+    font-size: 11px;
+}}
+QFrame#TopBarFrame {{
+    background-color: {panel_bg};
+    border-bottom: 1px solid {border};
+}}
+QLabel#SearchCount {{
+    color: {muted_text};
+    font-size: 11px;
+    min-width: 46px;
+    qproperty-alignment: AlignCenter;
+}}
+QPushButton#TopBarButton {{
+    background: transparent;
+    border: none;
+    color: {text_fg};
+    padding: 3px 7px;
+    font-weight: 600;
+    font-size: 11px;
+}}
+QPushButton#TopBarButton:hover {{
+    background-color: {selection};
+    color: {highlight_text};
+    border-radius: 6px;
+}}
+QPushButton[navButton="true"] {{
+    background-color: {panel_bg};
+    border: 1px solid {border};
+    padding: 6px 12px;
+    font-weight: 600;
+}}
+QPushButton[navButton="true"]:checked {{
+    background-color: {selection};
+    color: {highlight_text};
+    border-color: {selection};
+}}
+QPushButton#SearchNavButton {{
+    background: transparent;
+    border: 1px solid {border};
+    color: {text_fg};
+    padding: 2px 6px;
+    min-width: 24px;
+    border-radius: 5px;
+    font-size: 11px;
+}}
+QPushButton#SearchNavButton:hover {{
+    background-color: {selection};
+    color: {highlight_text};
+}}
+QPushButton#WindowButton {{
+    background: transparent;
+    border: 1px solid {border};
+    color: {text_fg};
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+}}
+QPushButton#WindowButton:hover {{
+    background-color: {selection};
+    color: {highlight_text};
+}}
+QPushButton#WindowButtonClose {{
+    background: transparent;
+    border: 1px solid {border};
+    color: {text_fg};
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+}}
+QPushButton#WindowButtonClose:hover {{
+    background-color: #e81123;
+    color: #ffffff;
+}}
+QLineEdit#SearchField {{
+    background-color: {text_bg};
+    color: {text_fg};
+    border: 1px solid {border};
+    border-radius: 6px;
+    padding: 3px 9px;
+    min-height: 22px;
+    font-size: 11px;
+}}
+QLabel#SectionLabel {{
+    font-weight: 700;
+    font-size: 12px;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    color: {muted_text};
+}}
+QLabel#Subheading {{
+    font-weight: 700;
+}}
+QLabel#MetaLabel {{
+    color: {muted_text};
+    font-size: 11px;
+}}
+QLabel#ProjectLabel {{
+    font-weight: 700;
+    color: {text_fg};
+}}
+QFrame#ActionsFrame {{
+    background: transparent;
+}}
+QFrame#ContentFrame {{
+    background: transparent;
+}}
+QFrame#ActionCard {{
+    background-color: {panel_bg};
+    border: 1px solid {border};
+    border-radius: 12px;
+}}
+QFrame#PanelCard {{
+    background-color: {panel_bg};
+    border: 1px solid {border};
+    border-radius: 10px;
+}}
+QFrame#TabBar {{
+    background-color: {panel_bg};
+    border: 1px solid {border};
+    border-radius: 6px;
+}}
+QPushButton {{
+    background-color: {button_bg};
+    color: {button_fg};
+    border: 1px solid {border};
+    padding: 8px 12px;
+    border-radius: 8px;
+}}
+QPushButton[actionButton="true"] {{
+    font-weight: 600;
+    text-align: left;
+    padding: 8px 12px;
+}}
+QPushButton#GhostButton {{
+    background-color: transparent;
+    border: 1px dashed {border};
+    min-height: 20px;
+    min-width: 24px;
+    padding: 2px 4px;
+}}
+QPushButton:hover {{
+    background-color: {selection};
+    color: {highlight_text};
+}}
+QPushButton#GhostButton:hover {{
+    background-color: {panel_bg};
+    color: {text_fg};
+}}
+
+QTextEdit#TextArea {{
+    background-color: {text_bg};
+    color: {text_fg};
+    border: 1px solid {border};
+    border-radius: 8px;
+    padding: 6px 6px 6px 0;
+    selection-background-color: {selection};
+    selection-color: {highlight_text};
+}}
+QTextEdit#TextArea QScrollBar:vertical {{
+    background: {panel_bg};
+    width: 10px;
+    margin: 0px;
+    border: 1px solid {border};
+    border-radius: 6px;
+}}
+QTextEdit#TextArea QScrollBar::handle:vertical {{
+    background: {selection};
+    min-height: 30px;
+    border-radius: 6px;
+}}
+QTextEdit#TextArea QScrollBar::add-line:vertical, QTextEdit#TextArea QScrollBar::sub-line:vertical {{
+    height: 0px;
+}}
+
+QTreeWidget#DocTree {{
+    background-color: {tree_bg};
+    color: {tree_fg};
+    border: 1px solid {border};
+    border-radius: 8px;
+    padding: 2px;
+}}
+QTreeWidget#DocTree::item:selected {{
+    background-color: {selection};
+    color: {highlight_text};
+    border-radius: 4px;
+}}
+
+QTreeWidget#CodeTree {{
+    background-color: {tree_bg};
+    color: {tree_fg};
+    border: 1px solid {border};
+    border-radius: 8px;
+    padding: 2px;
+}}
+QTreeWidget#CodeTree::item:selected {{
+    background-color: {selection};
+    color: {highlight_text};
+    border-radius: 4px;
+}}
+
+QHeaderView::section {{
+    background-color: transparent;
+    color: {muted_text};
+    border: none;
+    border-bottom: 1px solid {border};
+    padding: 6px 4px;
+    font-weight: 700;
+    font-size: 10px;
+    text-transform: uppercase;
+}}
+
+QMenu {{
+    background-color: {panel_bg};
+    color: {text_fg};
+    border: 1px solid {border};
+}}
+
+QMenu::item {{
+    padding: 6px 24px;
+    background-color: transparent;
+}}
+
+QMenu::item:selected {{
+    background-color: {selection};
+    color: {highlight_text};
+}}
+

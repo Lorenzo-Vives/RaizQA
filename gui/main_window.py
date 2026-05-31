@@ -50,6 +50,7 @@ class RaizQAGUI(QMainWindow):
     signal_req_update_code = Signal(str, str, str, str)
     signal_req_add_fragment = Signal(str, str, object)
     signal_req_update_document = Signal(str, str)
+    signal_req_save_all = Signal(dict)
     
     AUTO_SAVE_INTERVAL = 30000
     COLOR_PALETTE = [
@@ -265,6 +266,7 @@ class RaizQAGUI(QMainWindow):
         docs_layout.addLayout(docs_header)
 
         self.doc_tree = DocumentTree(drop_callback=self._on_doc_tree_drop)
+        self.doc_tree.setObjectName("DocTree")
         self.doc_tree.setHeaderLabels(["Documentos"])
         self.doc_tree.currentItemChanged.connect(self.display_document)
         self.doc_tree.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -301,6 +303,7 @@ class RaizQAGUI(QMainWindow):
         code_layout.addLayout(code_header_row)
 
         self.code_tree = CodeTree(drop_callback=self._on_code_tree_drop)
+        self.code_tree.setObjectName("CodeTree")
         self.code_tree.setHeaderLabels(["Código", "n", "Memo"])
         header = self.code_tree.header()
         header.setStretchLastSection(False)
@@ -356,6 +359,7 @@ class RaizQAGUI(QMainWindow):
         self.viewer_stack = QStackedWidget()
 
         self.text_area = QTextEdit()
+        self.text_area.setObjectName("TextArea")
         self.text_area.setReadOnly(True)
         self.text_area.setContextMenuPolicy(Qt.CustomContextMenu)
         self.text_area.customContextMenuRequested.connect(self.text_context_menu)
@@ -541,6 +545,7 @@ class RaizQAGUI(QMainWindow):
         self.codes_dict = codes_dict
         self.themes_dict = themes_dict
         self.populate_code_tree() # Repinta el árbol con el nuevo diccionario
+        self.save_project() # Guarda todo el estado en un único JSON
 
     def populate_code_tree(self):
         """Reconstruye el árbol de códigos aplicando temas/categorías jerárquicamente."""
@@ -641,257 +646,19 @@ class RaizQAGUI(QMainWindow):
         return get_theme(self.is_dark_mode)
 
     def apply_theme(self):
-        theme = self._current_theme()
-        highlight_text = "#0b0b0b" if self.is_dark_mode else "#ffffff"
+        from gui import theme
+        theme.apply_theme_to_window(self, self.is_dark_mode)
 
-        palette = QPalette()
-        palette.setColor(QPalette.Window, QColor(theme["window_bg"]))
-        palette.setColor(QPalette.Base, QColor(theme["text_bg"]))
-        palette.setColor(QPalette.AlternateBase, QColor(theme["panel_bg"]))
-        palette.setColor(QPalette.Text, QColor(theme["text_fg"]))
-        palette.setColor(QPalette.Button, QColor(theme["button_bg"]))
-        palette.setColor(QPalette.ButtonText, QColor(theme["button_fg"]))
-        palette.setColor(QPalette.Highlight, QColor(theme["selection"]))
-        palette.setColor(QPalette.HighlightedText, QColor(highlight_text))
-
-        app = QApplication.instance()
-        if app:
-            app.setPalette(palette)
-        self.setPalette(palette)
-
+        current_theme_dict = theme.get_theme(self.is_dark_mode)
+        
         if hasattr(self, "actions_panel"):
             self.actions_panel.update_theme_icon(self.is_dark_mode)
 
-        base_styles = f"""
-            QMainWindow {{
-                background-color: {theme['window_bg']};
-                color: {theme['text_fg']};
-            }}
-            QLabel {{
-                color: {theme['text_fg']};
-            }}
-            QLabel#TopBrand {{
-                font-weight: 700;
-                padding-left: 2px;
-                font-size: 11px;
-            }}
-            QFrame#TopBarFrame {{
-                background-color: {theme['panel_bg']};
-                border-bottom: 1px solid {theme['border']};
-            }}
-            QLabel#SearchCount {{
-                color: {theme['muted_text']};
-                font-size: 11px;
-                min-width: 46px;
-                qproperty-alignment: AlignCenter;
-            }}
-            QPushButton#TopBarButton {{
-                background: transparent;
-                border: none;
-                color: {theme['text_fg']};
-                padding: 3px 7px;
-                font-weight: 600;
-                font-size: 11px;
-            }}
-            QPushButton#TopBarButton:hover {{
-                background-color: {theme['selection']};
-                color: {highlight_text};
-                border-radius: 6px;
-            }}
-            QPushButton[navButton="true"] {{
-                background-color: {theme['panel_bg']};
-                border: 1px solid {theme['border']};
-                padding: 6px 12px;
-                font-weight: 600;
-            }}
-            QPushButton[navButton="true"]:checked {{
-                background-color: {theme['selection']};
-                color: {highlight_text};
-                border-color: {theme['selection']};
-            }}
-            QPushButton#SearchNavButton {{
-                background: transparent;
-                border: 1px solid {theme['border']};
-                color: {theme['text_fg']};
-                padding: 2px 6px;
-                min-width: 24px;
-                border-radius: 5px;
-                font-size: 11px;
-            }}
-            QPushButton#SearchNavButton:hover {{
-                background-color: {theme['selection']};
-                color: {highlight_text};
-            }}
-            QPushButton#WindowButton {{
-                background: transparent;
-                border: 1px solid {theme['border']};
-                color: {theme['text_fg']};
-                padding: 1px 6px;
-                border-radius: 4px;
-                font-size: 10px;
-            }}
-            QPushButton#WindowButton:hover {{
-                background-color: {theme['selection']};
-                color: {highlight_text};
-            }}
-            QPushButton#WindowButtonClose {{
-                background: transparent;
-                border: 1px solid {theme['border']};
-                color: {theme['text_fg']};
-                padding: 1px 6px;
-                border-radius: 4px;
-                font-size: 10px;
-            }}
-            QPushButton#WindowButtonClose:hover {{
-                background-color: #e81123;
-                color: #ffffff;
-            }}
-            QLineEdit#SearchField {{
-                background-color: {theme['text_bg']};
-                color: {theme['text_fg']};
-                border: 1px solid {theme['border']};
-                border-radius: 6px;
-                padding: 3px 9px;
-                min-height: 22px;
-                font-size: 11px;
-            }}
-            QLabel#SectionLabel {{
-                font-weight: 700;
-                font-size: 12px;
-                letter-spacing: 0.4px;
-                text-transform: uppercase;
-                color: {theme['muted_text']};
-            }}
-            QLabel#Subheading {{
-                font-weight: 700;
-            }}
-            QLabel#MetaLabel {{
-                color: {theme['muted_text']};
-                font-size: 11px;
-            }}
-            QLabel#ProjectLabel {{
-                font-weight: 700;
-            }}
-            QFrame#ActionsFrame {{
-                background: transparent;
-            }}
-            QFrame#ContentFrame {{
-                background: transparent;
-            }}
-            QFrame#ActionCard {{
-                background-color: {theme['panel_bg']};
-                border: 1px solid {theme['border']};
-                border-radius: 12px;
-            }}
-            QFrame#PanelCard {{
-                background-color: {theme['panel_bg']};
-                border: 1px solid {theme['border']};
-                border-radius: 10px;
-            }}
-            QFrame#TabBar {{
-                background-color: {theme['panel_bg']};
-                border: 1px solid {theme['border']};
-                border-radius: 6px;
-            }}
-            QPushButton {{
-                background-color: {theme['button_bg']};
-                color: {theme['button_fg']};
-                border: 1px solid {theme['border']};
-                padding: 8px 12px;
-                border-radius: 8px;
-            }}
-            QPushButton[actionButton="true"] {{
-                font-weight: 600;
-                text-align: left;
-                padding: 8px 12px;
-            }}
-            QPushButton#GhostButton {{
-                background-color: transparent;
-                border: 1px dashed {theme['border']};
-                min-height: 20px;
-                min-width: 24px;
-                padding: 2px 4px;
-            }}
-            QPushButton:hover {{
-                background-color: {theme['selection']};
-                color: {highlight_text};
-            }}
-            QPushButton#GhostButton:hover {{
-                background-color: {theme['panel_bg']};
-                color: {theme['text_fg']};
-            }}
-        """
-        self.setStyleSheet(base_styles)
-
-        self.text_area.setStyleSheet(
-            f"""
-            QTextEdit {{
-                background-color: {theme['text_bg']};
-                color: {theme['text_fg']};
-                border: 1px solid {theme['border']};
-                border-radius: 8px;
-                padding: 6px 6px 6px 0;
-                selection-background-color: {theme['selection']};
-                selection-color: {highlight_text};
-            }}
-            QScrollBar:vertical {{
-                background: {theme['panel_bg']};
-                width: 10px;
-                margin: 0px;
-                border: 1px solid {theme['border']};
-                border-radius: 6px;
-            }}
-            QScrollBar::handle:vertical {{
-                background: {theme['selection']};
-                min-height: 30px;
-                border-radius: 6px;
-            }}
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
-                height: 0px;
-            }}
-            """
-        )
-        self.image_viewer.apply_theme(theme)
-
-        self.doc_tree.setStyleSheet(
-            f"""
-            QTreeWidget {{
-                background-color: {theme['tree_bg']};
-                color: {theme['tree_fg']};
-                border: 1px solid {theme['border']};
-                border-radius: 8px;
-                padding: 4px;
-            }}
-            QTreeWidget::item:selected {{
-                background-color: {theme['selection']};
-                color: {highlight_text};
-            }}
-            """
-        )
-
-        self.code_tree.setStyleSheet(
-            f"""
-            QTreeWidget {{
-                background-color: {theme['tree_bg']};
-                color: {theme['tree_fg']};
-                border: 1px solid {theme['border']};
-                border-radius: 8px;
-                padding: 4px;
-            }}
-            QTreeWidget::item:selected {{
-                background-color: {theme['selection']};
-                color: {highlight_text};
-            }}
-            """
-        )
-
-        self.lbl_working_dir.setStyleSheet(f"font-size: 11px; color: {theme['muted_text']};")
-
-        self.lbl_project.setStyleSheet(f"color: {theme['text_fg']}; font-weight: 700;")
-
         if hasattr(self, "local_search_widget"):
-            self.local_search_widget.update_theme(self._current_theme(), self.is_dark_mode)
+            self.local_search_widget.update_theme(current_theme_dict, self.is_dark_mode)
 
+        self.image_viewer.apply_theme(current_theme_dict)
+        
         self._refresh_code_tree_colors()
         self.restore_highlights()
         self._apply_column_selection_style()
@@ -963,6 +730,7 @@ class RaizQAGUI(QMainWindow):
             new_text = dialog.get_memo()
             self.memo_manager.add_or_update_memo(code_name, new_text)
             self.update_memo_icon(code_name, has_memo=bool(new_text.strip()))
+            self.save_project()
             QMessageBox.information(self, "Memo guardado", f"Memo actualizado para '{code_name}'.")
 
     def delete_memo(self, code_name):
@@ -970,6 +738,7 @@ class RaizQAGUI(QMainWindow):
             return
         self.memo_manager.delete_memo(code_name)
         self.update_memo_icon(code_name, has_memo=False)
+        self.save_project()
 
     def delete_document(self, doc_item):
         if not doc_item or doc_item.data(0, Qt.UserRole) != "doc":
@@ -1196,7 +965,14 @@ class RaizQAGUI(QMainWindow):
             return
         self._rebuild_doc_groups_from_tree()
         documents = self._all_documents()
-        self.current_project.save_state([], documents, self.highlights, self.doc_groups, self.code_themes, self.case_studies)
+        state_data = {
+            "documents": documents,
+            "highlights": self.highlights,
+            "doc_groups": self.doc_groups,
+            "themes": getattr(self, "code_themes", []),
+            "case_studies": getattr(self, "case_studies", [])
+        }
+        self.signal_req_save_all.emit(state_data)
 
     def save_project_as(self):
         if not self.current_project:
@@ -1281,16 +1057,13 @@ class RaizQAGUI(QMainWindow):
         if not self.current_project:
             return
 
-        data = self.current_project.load_state()
+        data = self.current_project.load_project_data()
 
         self.code_themes = data.get("themes", [])
         self.case_studies = data.get("case_studies", [])
         self.highlights = data.get("highlights", {})
 
-        # ---------------------------------------------------------
-        # SOLUCIÓN: Cargar las EDDs del backend PRIMERO 
-        # ---------------------------------------------------------
-        self.current_project.load_edds()
+        # Los diccionarios ya se cargaron en el proyecto, solo sincronizamos
         self.codes_dict = self.current_project.codes_dict
         self.themes_dict = self.current_project.themes_dict
 

@@ -1,3 +1,7 @@
+import os
+from PySide6.QtGui import QPalette, QColor
+from PySide6.QtWidgets import QApplication
+
 """Configuraciones de tema compartidas entre la ventana principal y los diálogos."""
 
 LIGHT_THEME = {
@@ -36,3 +40,45 @@ DARK_THEME = {
 def get_theme(is_dark=False):
     """Devuelve el diccionario de colores para el modo solicitado."""
     return DARK_THEME if is_dark else LIGHT_THEME
+
+
+_qss_cache = None
+
+def apply_theme_to_window(window, is_dark_mode):
+    """Aplica la paleta y los estilos QSS a la ventana."""
+    global _qss_cache
+    
+    theme = get_theme(is_dark_mode)
+    highlight_text = "#0b0b0b" if is_dark_mode else "#ffffff"
+
+    # 1. Aplicar QPalette
+    palette = QPalette()
+    palette.setColor(QPalette.Window, QColor(theme["window_bg"]))
+    palette.setColor(QPalette.Base, QColor(theme["text_bg"]))
+    palette.setColor(QPalette.AlternateBase, QColor(theme["panel_bg"]))
+    palette.setColor(QPalette.Text, QColor(theme["text_fg"]))
+    palette.setColor(QPalette.Button, QColor(theme["button_bg"]))
+    palette.setColor(QPalette.ButtonText, QColor(theme["button_fg"]))
+    palette.setColor(QPalette.Highlight, QColor(theme["selection"]))
+    palette.setColor(QPalette.HighlightedText, QColor(highlight_text))
+
+    app = QApplication.instance()
+    if app:
+        app.setPalette(palette)
+    window.setPalette(palette)
+
+    # 2. Cargar y formatear QSS
+    if _qss_cache is None:
+        qss_path = os.path.join(os.path.dirname(__file__), "styles.qss")
+        try:
+            with open(qss_path, "r", encoding="utf-8") as f:
+                _qss_cache = f.read()
+        except Exception as e:
+            print(f"Error loading styles.qss: {e}")
+            _qss_cache = ""
+
+    # Usamos formateo seguro. 
+    # El archivo de estilos utiliza variables como {window_bg}.
+    if _qss_cache:
+        formatted_qss = _qss_cache.format(**theme, highlight_text=highlight_text)
+        window.setStyleSheet(formatted_qss)

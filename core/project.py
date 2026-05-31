@@ -1,12 +1,13 @@
 import os
 import json
 import shutil
+import platform
+import subprocess
 from docx import Document as DocxDocument
 from PyPDF2 import PdfReader
 from diff_match_patch import diff_match_patch
 
 from core.memos import MemoManager
-from core.pointer_manager import PointerManager
 from core.diary_manager import DiaryManager
 
 
@@ -26,7 +27,8 @@ class Project:
         self.state_path = os.path.join(self.path, "project_data.json")
         self.project_path = self.path  # alias por compatibilidad
         self.diary_manager = DiaryManager(self.path)
-        self.memo_manager = MemoManager(self.path)
+        self.memos_dict = {}
+        self.memo_manager = MemoManager(self.memos_dict)
         
         # Nuevas Estructuras de Datos (EDDs)
         self.codes_dict = {}
@@ -47,27 +49,165 @@ class Project:
             with open(self.metadata_path, "w", encoding="utf-8") as f:
                 json.dump(meta, f, indent=4, ensure_ascii=False)
 
-    def save_state(self, codes, documents, highlights, doc_groups=None, themes=None, case_studies=None):
-        """Persiste el estado principal del proyecto."""
+    def save_project_data(self, documents, highlights, doc_groups=None, themes=None, case_studies=None):
+        """Persiste todo el estado (EDDs y metadatos) en un único archivo atómico."""
         data = {
-            "codes": codes,
             "documents": documents,
             "highlights": highlights,
+            "codes_dict": self.codes_dict,
+            "themes_dict": self.themes_dict,
+            "memos_dict": self.memos_dict,
         }
         if doc_groups is not None:
             data["doc_groups"] = doc_groups
+            self.sync_doc_groups_to_fs(doc_groups)
         if themes is not None:
             data["themes"] = themes
         if case_studies is not None:
             data["case_studies"] = case_studies
+            
+        tmp_path = self.state_path + ".tmp"
+        bak_path = self.state_path + ".bak"
         
-        PointerManager.atomic_save(self.path, "project_data", data)
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=4, ensure_ascii=False)
+                
+            import time
+            success = False
+            for _ in range(3):
+                try:
+                    if os.path.exists(self.state_path):
+                        os.replace(self.state_path, bak_path)
+                    os.replace(tmp_path, self.state_path)
+                    success = True
+                    break
+                except Exception:
+                    time.sleep(0.2)
+            if not success:
+                print(f"Advertencia: No se pudo actualizar atómicamente {self.state_path}")
+        except Exception as e:
+            print(f"Error fatal al guardar proyecto: {e}")
 
-    def load_state(self):
-        """Carga el estado guardado (si existe)."""
-        default_state = {"codes": [], "documents": [], "highlights": {}}
-        return PointerManager.atomic_load(self.path, "project_data", default=default_state)
+    def load_project_data(self):
+        """Carga el estado único guardado. Si no existe, intenta con el backup."""
+        default_state = {"documents": [], "highlights": {}, "codes_dict": {}, "themes_dict": {}}
+        
+        data = default_state
+        if os.path.exists(self.state_path):
+            try:
+                with open(self.state_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except Exception:
+                # Si el original está corrupto, usar el backup
+                bak_path = self.state_path + ".bak"
+                if os.path.exists(bak_path):
+                    with open(bak_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        
+        self.codes_dict = data.get("codes_dict", {})
+        self.themes_dict = data.get("themes_dict", {})
+        self.memos_dict = data.get("memos_dict", {})
+        
+        # Migración: Si memos_dict está vacío, intentar cargar del archivo antiguo memos.json
+        if not self.memos_dict:
+            old_memos_path = os.path.join(self.path, "memos.json")
+            if os.path.exists(old_memos_path):
+                try:
+                    with open(old_memos_path, "r", encoding="utf-8") as f:
+                        self.memos_dict = json.load(f)
+                except Exception:
+                    pass
+                    
+        self.memo_manager.memos = self.memos_dict
+        
+        fs_doc_groups = self.scan_doc_groups_from_fs()
+        if fs_doc_groups and (len(fs_doc_groups.get("__root__", [])) > 0 or len(fs_doc_groups) > 1):
+            data["doc_groups"] = fs_doc_groups
+            
+        return data
 
+    def sync_doc_groups_to_fs(self, doc_groups):
+        """Refleja la estructura de doc_groups en el sistema de archivos real usando .raizptr."""
+        if not doc_groups or not os.path.exists(self.documents_path):
+            return
+            
+        # 1. Eliminar SOLAMENTE los .raizptr existentes (para ser seguros y no borrar archivos del usuario)
+        for item in os.listdir(self.documents_path):
+            item_path = os.path.join(self.documents_path, item)
+            if os.path.isdir(item_path):
+                # Eliminar solo .raizptr dentro del directorio
+                for sub_item in os.listdir(item_path):
+                    if sub_item.endswith(".raizptr"):
+                        os.remove(os.path.join(item_path, sub_item))
+                
+                # Si el directorio quedó vacío y no está en doc_groups, lo borramos
+                if not os.listdir(item_path) and item not in doc_groups:
+                    try:
+                        os.rmdir(item_path)
+                    except OSError:
+                        pass
+                
+        # 2. Recrear las subcarpetas según doc_groups y añadir los .raizptr
+        for group_name, docs in doc_groups.items():
+            if group_name == "__root__":
+                continue
+                
+            group_dir = os.path.join(self.documents_path, group_name)
+            os.makedirs(group_dir, exist_ok=True)
+            
+            # Ocultar la carpeta en Windows y macOS
+            if platform.system() == "Windows":
+                try:
+                    import ctypes
+                    FILE_ATTRIBUTE_HIDDEN = 0x02
+                    ctypes.windll.kernel32.SetFileAttributesW(group_dir, FILE_ATTRIBUTE_HIDDEN)
+                except Exception:
+                    pass
+            elif platform.system() == "Darwin":
+                try:
+                    subprocess.run(["chflags", "hidden", group_dir], check=False)
+                except Exception:
+                    pass
+            
+            for doc in docs:
+                ptr_path = os.path.join(group_dir, f"{doc}.raizptr")
+                with open(ptr_path, "w", encoding="utf-8") as f:
+                    f.write(f"target=../{doc}")
+
+    def scan_doc_groups_from_fs(self):
+        """Reconstruye doc_groups escaneando la carpeta documentos/."""
+        doc_groups = {"__root__": []}
+        if not os.path.exists(self.documents_path):
+            return doc_groups
+            
+        for item in os.listdir(self.documents_path):
+            item_path = os.path.join(self.documents_path, item)
+            
+            # Documentos en la raíz
+            if os.path.isfile(item_path):
+                ext = os.path.splitext(item)[1].lower()
+                if ext in self.TEXT_EXTENSIONS or ext in self.IMAGE_EXTENSIONS:
+                    doc_groups["__root__"].append(item)
+                    
+            # Subcarpetas
+            elif os.path.isdir(item_path):
+                group_name = item
+                doc_groups[group_name] = []
+                for sub_item in os.listdir(item_path):
+                    if sub_item.endswith(".raizptr"):
+                        doc_name = sub_item[:-8] # quitar .raizptr
+                        doc_groups[group_name].append(doc_name)
+                        
+        # Un documento no debe aparecer en __root__ si ya está en una carpeta
+        docs_in_groups = set()
+        for group, docs in doc_groups.items():
+            if group != "__root__":
+                docs_in_groups.update(docs)
+                
+        doc_groups["__root__"] = [doc for doc in doc_groups["__root__"] if doc not in docs_in_groups]
+        
+        return doc_groups
     # ------------------------------------------------------------------
     # DIARIO DE CODIFICACIÓN
     # ------------------------------------------------------------------
@@ -305,21 +445,7 @@ class Project:
             if code_name in self.themes_dict[theme_name]["codes"]:
                 self.themes_dict[theme_name]["codes"].remove(code_name)
 
-    # --- PERSISTENCIA DE EDDS ---
-    def save_edds(self):
-        """Persiste solo las EDDs a disco de forma atómica y pura."""
-        data = {
-            "codes_dict": self.codes_dict,
-            "themes_dict": self.themes_dict
-        }
-        PointerManager.atomic_save(self.path, "edds_data", data)
-            
-    def load_edds(self):
-        """Carga las EDDs desde disco si existen."""
-        data = PointerManager.atomic_load(self.path, "edds_data", default={})
-        self.codes_dict = data.get("codes_dict", {})
-        self.themes_dict = data.get("themes_dict", {})
-
+    # --- PERSISTENCIA ELIMINADA: TODO SE MANEJA EN SAVE_PROJECT_DATA ---
     def update_document_text(self, doc_name, new_text):
         """
         Actualiza el texto en disco y resincroniza dinámicamente 
