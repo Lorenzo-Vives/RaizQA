@@ -1,0 +1,20 @@
+{
+    "documents": [],
+    "highlights": {},
+    "codes_dict": {
+        "MyCode": {
+            "hexcolor": "#ff0000",
+            "memo": "MyMemo",
+            "fragments": {}
+        }
+    },
+    "themes_dict": {},
+    "memos_dict": {
+        "MyCode": "MyMemo"
+    },
+    "doc_groups": {
+        "__root__": []
+    },
+    "themes": [],
+    "case_studies": []
+}

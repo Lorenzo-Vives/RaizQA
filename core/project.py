@@ -109,6 +109,14 @@ class Project:
         self.themes_dict = data.get("themes_dict", {})
         self.memos_dict = data.get("memos_dict", {})
         
+        # Migración: Asegurar que los códigos tengan la estructura de árbol (parent/children)
+        for code, code_data in self.codes_dict.items():
+            if "parent" not in code_data:
+                code_data["parent"] = None
+            if "children" not in code_data:
+                code_data["children"] = []
+        
+        
         # Migración: Si memos_dict está vacío, intentar cargar del archivo antiguo memos.json
         if not self.memos_dict:
             old_memos_path = os.path.join(self.path, "memos.json")
@@ -358,16 +366,42 @@ class Project:
         return self.texts_dict[doc_name]
 
     # --- CRUD CÓDIGOS ---
-    def add_code(self, code_name, hexcolor="#5d9bd3", memo=""):
+    def add_code(self, code_name, hexcolor="#5d9bd3", memo="", parent_name=None):
         if code_name not in self.codes_dict:
+            # Validar que el padre exista
+            if parent_name and parent_name not in self.codes_dict:
+                parent_name = None
+
             self.codes_dict[code_name] = {
                 "hexcolor": hexcolor,
                 "memo": memo,
-                "fragments": {} # doc_name: [{"start": 0, "end": 10}, ...]
+                "fragments": {}, # doc_name: [{"start": 0, "end": 10}, ...]
+                "parent": parent_name,
+                "children": []
             }
+            if parent_name:
+                self.codes_dict[parent_name]["children"].append(code_name)
 
-    def delete_code(self, code_name):
+    def delete_code(self, code_name, cascade=False):
         if code_name in self.codes_dict:
+            code_data = self.codes_dict[code_name]
+            
+            # Gestionar hijos (subcódigos)
+            children = list(code_data.get("children", []))
+            for child in children:
+                if cascade:
+                    self.delete_code(child, cascade=True)
+                else:
+                    # Promover a la raíz
+                    if child in self.codes_dict:
+                        self.codes_dict[child]["parent"] = None
+            
+            # Sacar de la lista de hijos del padre
+            parent = code_data.get("parent")
+            if parent and parent in self.codes_dict:
+                if code_name in self.codes_dict[parent]["children"]:
+                    self.codes_dict[parent]["children"].remove(code_name)
+
             del self.codes_dict[code_name]
             # También lo sacamos de cualquier tema al que pertenezca
             for theme in self.themes_dict.values():
@@ -387,6 +421,19 @@ class Project:
                 if old_name in theme.get("codes", []):
                     theme["codes"].remove(old_name)
                     theme["codes"].append(new_name)
+                    
+            # Actualizar en los hijos
+            for child in self.codes_dict[new_name].get("children", []):
+                if child in self.codes_dict:
+                    self.codes_dict[child]["parent"] = new_name
+                    
+            # Actualizar en el padre
+            parent = self.codes_dict[new_name].get("parent")
+            if parent and parent in self.codes_dict:
+                parent_children = self.codes_dict[parent]["children"]
+                for i in range(len(parent_children)):
+                    if parent_children[i] == old_name:
+                        parent_children[i] = new_name
         else:
             target_name = old_name
             

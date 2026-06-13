@@ -52,8 +52,8 @@ class RaizQAGUI(QMainWindow):
     signal_req_merge_projects = Signal(str, dict)
 
     # SEÑALES CRUD EDDs
-    signal_req_add_code = Signal(str, str, str)
-    signal_req_delete_code = Signal(str)
+    signal_req_add_code = Signal(str, str, str, str) # code_label, hexcolor, memo, parent_name
+    signal_req_delete_code = Signal(str, bool) # code_name, cascade
     signal_req_update_code = Signal(str, str, str, str)
     signal_req_add_fragment = Signal(str, str, object)
     signal_req_update_document = Signal(str, str)
@@ -108,6 +108,8 @@ class RaizQAGUI(QMainWindow):
         self._zoom_level = 0
         self._codes_expanded = True
         self._image_selection_info = None
+
+        self.has_unsaved_changes = False
 
         # -------------------- LAYOUT PRINCIPAL --------------------
         central_widget = QWidget()
@@ -529,14 +531,14 @@ class RaizQAGUI(QMainWindow):
         if dialog.exec():
             settings = dialog.get_settings()
             self.signal_req_merge_projects.emit(path, settings)
-            self.actions_panel.btn_project.setText("⏳ Combinando...")
-            self.actions_panel.btn_project.setEnabled(False)
+            self.actions_panel.btn_teamwork.setText("⏳ Combinando...")
+            self.actions_panel.btn_teamwork.setEnabled(False)
             self._show_loading_dialog("Combinar Proyectos", "Respaldando y combinando proyectos, por favor espera...")
 
     def handle_project_merged(self):
         self._close_loading_dialog()
-        self.actions_panel.btn_project.setText("📁 Proyecto ▼")
-        self.actions_panel.btn_project.setEnabled(True)
+        self.actions_panel.btn_teamwork.setText("Colaborar 🫂 ▼")
+        self.actions_panel.btn_teamwork.setEnabled(True)
         
         QMessageBox.information(self, "Combinar Proyectos", "Los proyectos se combinaron exitosamente.")
         
@@ -595,12 +597,12 @@ class RaizQAGUI(QMainWindow):
         
     def handle_project_exported(self, path):
         self._close_loading_dialog()
-        self.actions_panel.btn_teamwork.setText("Teamwork 🫂 ▼")
+        self.actions_panel.btn_teamwork.setText("Colaborar 🫂 ▼")
         self.actions_panel.btn_teamwork.setEnabled(True)
 
     def handle_project_imported(self, project_path):
         self._close_loading_dialog()
-        self.actions_panel.btn_teamwork.setText("Teamwork 🫂 ▼")
+        self.actions_panel.btn_teamwork.setText("Colaborar 🫂 ▼")
         self.actions_panel.btn_teamwork.setEnabled(True)
         
         project_name = os.path.basename(project_path)
@@ -715,7 +717,9 @@ class RaizQAGUI(QMainWindow):
             print(f"DEBUG: code {k} -> {v}")
         self.codes_dict = codes_dict
         self.themes_dict = themes_dict
-        self.populate_code_tree() # Repinta el árbol con el nuevo diccionario
+        # Deferimos la reconstrucción del árbol al siguiente ciclo del event loop
+        # para evitar un Segmentation Fault al limpiar la UI desde un handler de señal activo.
+        QTimer.singleShot(0, self.populate_code_tree)
         self.save_project() # Guarda todo el estado en un único JSON
 
     def populate_code_tree(self):
@@ -725,35 +729,44 @@ class RaizQAGUI(QMainWindow):
         self._code_tree_updating = True
         self.code_tree.clear()
 
-        # Registro para saber qué códigos ya están dentro de una carpeta
         added_codes = set()
+
+        def add_subcodes(parent_item, parent_code_name):
+            children = self.codes_dict.get(parent_code_name, {}).get("children", [])
+            for child_name in children:
+                if child_name in self.codes_dict:
+                    child_item = self._create_code_node(child_name, self.codes_dict[child_name])
+                    parent_item.addChild(child_item)
+                    added_codes.add(child_name)
+                    add_subcodes(child_item, child_name)
 
         # 1. Crear los nodos padre (Carpetas de Temas)
         for theme in getattr(self, "code_themes", []):
             theme_name = theme.get("name", "Tema sin nombre")
             theme_codes = theme.get("codes", [])
             
-            # Crear el ítem de la carpeta/tema
             theme_item = QTreeWidgetItem([theme_name, "", ""])
             theme_item.setData(0, Qt.UserRole, "theme")  # Marcador para diferenciarlo
-            
-            # Le asignamos un icono de carpeta nativo del sistema
             theme_item.setIcon(0, self.icon_provider.icon(QFileIconProvider.Folder))
             
             self.code_tree.addTopLevelItem(theme_item)
 
-            # 2. Añadir los códigos como hijos de esta carpeta
+            # 2. Añadir los códigos raíz como hijos de esta carpeta
             for code_name in theme_codes:
-                if code_name in self.codes_dict:
-                    code_item = self._create_code_node(code_name, self.codes_dict[code_name])
-                    theme_item.addChild(code_item)
-                    added_codes.add(code_name)
+                if code_name in self.codes_dict and self.codes_dict[code_name].get("parent") is None:
+                    if code_name not in added_codes:
+                        code_item = self._create_code_node(code_name, self.codes_dict[code_name])
+                        theme_item.addChild(code_item)
+                        added_codes.add(code_name)
+                        add_subcodes(code_item, code_name)
 
-        # 3. Añadir los códigos "huérfanos" (que no pertenecen a ningún tema) en la raíz
+        # 3. Añadir los códigos "huérfanos" (raíz sin tema) en la raíz
         for code_name, code_data in self.codes_dict.items():
-            if code_name not in added_codes:
+            if code_name not in added_codes and code_data.get("parent") is None:
                 code_item = self._create_code_node(code_name, code_data)
                 self.code_tree.addTopLevelItem(code_item)
+                added_codes.add(code_name)
+                add_subcodes(code_item, code_name)
                 
         if getattr(self, "_codes_expanded", False):
             self.code_tree.expandAll()
@@ -781,7 +794,7 @@ class RaizQAGUI(QMainWindow):
     def handle_error(self, message):
         self._close_loading_dialog()
         if hasattr(self, 'actions_panel') and hasattr(self.actions_panel, 'btn_teamwork') and self.actions_panel.btn_teamwork.text().startswith("⏳"):
-            self.actions_panel.btn_teamwork.setText("Teamwork 🫂 ▼")
+            self.actions_panel.btn_teamwork.setText("Colaborar 🫂 ▼")
             self.actions_panel.btn_teamwork.setEnabled(True)
         QMessageBox.critical(self, "Error del Backend", message)
 
@@ -871,9 +884,25 @@ class RaizQAGUI(QMainWindow):
         elif action == rename_action:
             self._start_code_rename(item)
         elif action == delete_code_action:
-            reply = QMessageBox.question(self, "Eliminar código", f"¿Seguro que deseas eliminar '{code_name}' y todos sus fragmentos?", QMessageBox.Yes | QMessageBox.No)
-            if reply == QMessageBox.Yes:
-                self.signal_req_delete_code.emit(code_name)
+            children = self.codes_dict.get(code_name, {}).get("children", [])
+            if children:
+                msgBox = QMessageBox(self)
+                msgBox.setWindowTitle("Eliminar código padre")
+                msgBox.setText(f"El código '{code_name}' tiene {len(children)} subcódigos.")
+                msgBox.setInformativeText("¿Qué deseas hacer con los subcódigos?")
+                btn_cascade = msgBox.addButton("Borrar todo (Cascada)", QMessageBox.DestructiveRole)
+                btn_keep = msgBox.addButton("Mantener subcódigos", QMessageBox.AcceptRole)
+                btn_cancel = msgBox.addButton("Cancelar", QMessageBox.RejectRole)
+                msgBox.exec()
+                
+                if msgBox.clickedButton() == btn_cascade:
+                    self.signal_req_delete_code.emit(code_name, True)
+                elif msgBox.clickedButton() == btn_keep:
+                    self.signal_req_delete_code.emit(code_name, False)
+            else:
+                reply = QMessageBox.question(self, "Eliminar código", f"¿Seguro que deseas eliminar '{code_name}' y todos sus fragmentos?", QMessageBox.Yes | QMessageBox.No)
+                if reply == QMessageBox.Yes:
+                    self.signal_req_delete_code.emit(code_name, False)
         elif action == view_fragments_action:
             self.show_code_fragments(item, 1)
         elif action == view_memo_action:
@@ -1116,6 +1145,11 @@ class RaizQAGUI(QMainWindow):
 
     def reset_project_state(self):
         """Reinicia colecciones y widgets al cambiar de proyecto."""
+        self.has_unsaved_changes = False
+        if self.current_project:
+            self.setWindowTitle(f"RaizQA 🌱 - {self.current_project.name}")
+        else:
+            self.setWindowTitle("RaizQA 🌱")
         self.codes_dict = {}
         self.themes_dict = {}
         self.code_themes = []
@@ -1148,6 +1182,9 @@ class RaizQAGUI(QMainWindow):
             "case_studies": getattr(self, "case_studies", [])
         }
         self.signal_req_save_all.emit(state_data)
+        self.has_unsaved_changes = False
+        if self.current_project:
+            self.setWindowTitle(f"RaizQA 🌱 - {self.current_project.name}")
 
     def save_project_as(self):
         if not self.current_project:
@@ -1921,10 +1958,13 @@ class RaizQAGUI(QMainWindow):
         iterator = QTreeWidgetItemIterator(self.code_tree)
         code_names = []
         while iterator.value():
-            code_names.append(self._code_item_name(iterator.value()))
+            item = iterator.value()
+            name = self._code_item_name(item)
+            if name and self.codes_dict.get(name, {}).get("parent") is None:
+                code_names.append(name)
             iterator += 1
         if not code_names:
-            QMessageBox.warning(self, "Subcódigo", "Primero crea un código principal.")
+            QMessageBox.warning(self, "Subcódigo", "Primero crea un código principal (no se permiten subcódigos de subcódigos).")
             return
 
         parent_name, ok = QInputDialog.getItem(self, "Subcódigo", "Selecciona código padre:", code_names, 0, False)
@@ -1973,8 +2013,15 @@ class RaizQAGUI(QMainWindow):
 
         self._color_index += 1
         
+        parent_name = ""
+        if parent_item and parent_item.data(0, Qt.UserRole) == "code":
+            parent_name = parent_item.data(0, Qt.UserRole + 1)
+            # Solo permitir un nivel de anidamiento
+            if self.codes_dict.get(parent_name, {}).get("parent") is not None:
+                parent_name = self.codes_dict[parent_name]["parent"]
+        
         # Emitir señal al backend con el memo incluido
-        self.signal_req_add_code.emit(code_label, color_hex, memo)
+        self.signal_req_add_code.emit(code_label, color_hex, memo, parent_name)
 
 
     def create_new_code(self, selected_text, start, end, parent_item=None, code_label=None, is_image=False, note=None, image_selection=None):
@@ -2006,7 +2053,13 @@ class RaizQAGUI(QMainWindow):
         self._color_index += 1
 
         # 1. Crear el código en el backend
-        self.signal_req_add_code.emit(code_label, color_hex, memo)
+        parent_name = ""
+        if parent_item and parent_item.data(0, Qt.UserRole) == "code":
+            parent_name = parent_item.data(0, Qt.UserRole + 1)
+            # Solo permitir un nivel de anidamiento
+            if self.codes_dict.get(parent_name, {}).get("parent") is not None:
+                parent_name = self.codes_dict[parent_name]["parent"]
+        self.signal_req_add_code.emit(code_label, color_hex, memo, parent_name)
         
         # 2. Construir el paquete de datos del fragmento
         if is_image and image_selection:
@@ -2142,10 +2195,13 @@ class RaizQAGUI(QMainWindow):
         iterator = QTreeWidgetItemIterator(self.code_tree)
         code_names = []
         while iterator.value():
-            code_names.append(self._code_item_name(iterator.value()))
+            item = iterator.value()
+            name = self._code_item_name(item)
+            if name and self.codes_dict.get(name, {}).get("parent") is None:
+                code_names.append(name)
             iterator += 1
         if not code_names:
-            QMessageBox.warning(self, "Subcódigo", "Primero crea un código principal.")
+            QMessageBox.warning(self, "Subcódigo", "Primero crea un código principal (no se permiten subcódigos de subcódigos).")
             return
 
         parent_name, ok = QInputDialog.getItem(self, "Subcódigo", "Selecciona código padre:", code_names, 0, False)
@@ -2216,7 +2272,11 @@ class RaizQAGUI(QMainWindow):
         if not self.current_project:
             QMessageBox.information(self, "Temas y categorÃ­as", "Primero abre o crea un proyecto.")
             return
-        codes = list(self.codes_dict.keys())
+        
+        # Solo enviar códigos principales a la ventana de temas, 
+        # ya que los subcódigos heredan el tema de su padre implícitamente
+        codes = [name for name, data in self.codes_dict.items() if data.get("parent") is None]
+        
         dialog = ThemesCategoriesDialog(codes, self.code_themes, parent=self)
         if dialog.exec() == QDialog.Accepted:
             self.code_themes = dialog.get_themes_data()
@@ -2575,6 +2635,36 @@ class RaizQAGUI(QMainWindow):
                 walk(item.child(i))
         for idx in range(self.code_tree.topLevelItemCount()):
             walk(self.code_tree.topLevelItem(idx))
+
+    def mark_as_dirty(self, *args, **kwargs):
+        """Marca el proyecto como modificado (con cambios sin guardar)."""
+        self.has_unsaved_changes = True
+        if self.current_project and not self.windowTitle().endswith("*"):
+            self.setWindowTitle(f"RaizQA 🌱 - {self.current_project.name} *")
+
+    def closeEvent(self, event):
+        """Intercepta el evento de cierre si hay cambios sin guardar."""
+        if self.has_unsaved_changes:
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle("Cambios sin guardar")
+            msg_box.setText("Hay cambios sin guardar en el proyecto actual.")
+            msg_box.setInformativeText("¿Deseas guardar los cambios antes de salir?")
+            
+            btn_save = msg_box.addButton("Guardar y salir", QMessageBox.AcceptRole)
+            btn_discard = msg_box.addButton("Salir sin guardar", QMessageBox.DestructiveRole)
+            btn_cancel = msg_box.addButton("Cancelar", QMessageBox.RejectRole)
+            
+            msg_box.exec()
+            
+            if msg_box.clickedButton() == btn_save:
+                self.save_project()
+                event.accept()
+            elif msg_box.clickedButton() == btn_discard:
+                event.accept()
+            else:
+                event.ignore()
+        else:
+            event.accept()
 
 class ExportCodeSelectionDialog(QDialog):
     def __init__(self, code_rows, parent=None):

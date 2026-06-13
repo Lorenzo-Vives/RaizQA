@@ -33,6 +33,13 @@ class RaizQA:
         self.ventana.signal_req_set_project.connect(self.logica.req_set_project)
         self.ventana.signal_req_update_document.connect(self.logica.req_update_document)
         self.ventana.signal_req_save_all.connect(self.logica.req_save_all)
+        
+        # UI -> UI (Marcado de estado "sucio" / cambios sin guardar)
+        self.ventana.signal_req_add_code.connect(self.ventana.mark_as_dirty)
+        self.ventana.signal_req_delete_code.connect(self.ventana.mark_as_dirty)
+        self.ventana.signal_req_update_code.connect(self.ventana.mark_as_dirty)
+        self.ventana.signal_req_add_fragment.connect(self.ventana.mark_as_dirty)
+        self.ventana.signal_req_update_document.connect(self.ventana.mark_as_dirty)
 
         # 2. Backend -> UI (La lógica emite resultados, la ventana los muestra)
         self.logica.edds_updated.connect(self.ventana.handle_edds_updated)

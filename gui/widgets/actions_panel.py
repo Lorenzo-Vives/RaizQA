@@ -142,38 +142,31 @@ class ActionsPanelWidget(QFrame):
         
         action_create = QAction("Nuevo proyecto...", self)
         action_open = QAction("Abrir proyecto...", self)
-        action_merge = QAction("Combinar proyectos...", self)
-        action_export_rqa = QAction("Exportar proyecto (.rqa)...", self)
-        action_import_rqa = QAction("Importar proyecto (.rqa)...", self)
         
         action_create.triggered.connect(self.sig_create_project.emit)
         action_open.triggered.connect(self.sig_open_project.emit)
-        action_merge.triggered.connect(self.sig_merge_projects.emit)
-        action_export_rqa.triggered.connect(self.sig_export_rqa.emit)
-        action_import_rqa.triggered.connect(self.sig_import_rqa.emit)
         
         project_menu.addAction(action_create)
         project_menu.addAction(action_open)
-        project_menu.addSeparator()
-        project_menu.addAction(action_merge)
-        project_menu.addAction(action_import_rqa)
-        project_menu.addAction(action_export_rqa)
         
         self.btn_project.setMenu(project_menu)
         
         btn_import_doc = QPushButton("Importar Archivo")
         
-        self.btn_teamwork = QPushButton("Teamwork 🫂 ▼")
+        self.btn_teamwork = QPushButton("Colaborar 🫂 ▼")
         teamwork_menu = QMenu(self.btn_teamwork)
         
-        action_export_rex = QAction("Exportar archivo de intercambio (.rex)...", self)
-        action_import_rex = QAction("Importar archivo de intercambio (.rex)...", self)
+        action_merge = QAction("Combinar proyectos...", self)
+        action_import_rqa = QAction("Importar proyecto (.rqa)...", self)
+        action_export_rqa = QAction("Exportar proyecto (.rqa)...", self)
         
-        action_export_rex.triggered.connect(self.sig_export_rex.emit)
-        action_import_rex.triggered.connect(self.sig_import_rex.emit)
+        action_merge.triggered.connect(self.sig_merge_projects.emit)
+        action_import_rqa.triggered.connect(self.sig_import_rqa.emit)
+        action_export_rqa.triggered.connect(self.sig_export_rqa.emit)
         
-        teamwork_menu.addAction(action_export_rex)
-        teamwork_menu.addAction(action_import_rex)
+        teamwork_menu.addAction(action_merge)
+        teamwork_menu.addAction(action_import_rqa)
+        teamwork_menu.addAction(action_export_rqa)
         self.btn_teamwork.setMenu(teamwork_menu)
 
         btn_working_dir.clicked.connect(self.sig_working_dir.emit)
