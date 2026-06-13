@@ -18,12 +18,16 @@ class ReadmeDialog(QDialog):
         <ul>
             <li>Importar documentos (.txt, .pdf, .docx y .jpg)</li>
             <li>Crear y organizar códigos y subcódigos</li>
-            <li>Guardar fragmentos de texto codificados</li>
+            <li>Guardar fragmentos de texto y zonas de imágenes codificadas</li>
             <li>Escribir memos analíticos</li>
             <li>Desarrollar y exportar el diario de codificación</li>
             <li>Exportar el libro de códigos y fragmentos</li>
             <li>Visualizar los códigos y fragmentos asociados</li>
             <li>Realizar análisis comparados y nubes de palabras</li>
+            <li>Agrupar códigos en Temas y Categorías</li>
+            <li>Crear Estudios de Caso</li>
+            <li>Analizar cruces con Code Matrix Browser (Heatmap)</li>
+            <li>Trabajar en equipo: exportar, importar y fusionar proyectos</li>
         </ul>
 
         <h3>⚡ Guía rápida</h3>
@@ -39,7 +43,7 @@ class ReadmeDialog(QDialog):
         <p>Tu proyecto se guarda automáticamente cada 30 segundos.</p>
 
         <p style='color:gray; font-size:10pt; margin-top:20px;'>
-        Versión 1.5 — desarrollado en Python + PySide6 con ayuda de Codex y ChatGPT-5.
+        Versión 1.6.5 — desarrollado en Python + PySide6 con ayuda de Codex, ChatGPT-5 y Gemini Pro 3.1.
         </p>
         """
 

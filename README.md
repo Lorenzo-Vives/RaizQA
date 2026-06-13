@@ -21,6 +21,7 @@ RaizQA 🌱 es una aplicacion de analisis cualitativo escrita en Python con PySi
 - Nube de palabras.
 - Agrupacion de codigos en temas/categorias.
 - Estudio de casos basado en documentos y carpetas.
+- Trabajo en equipo: exportacion, importacion y fusion de proyectos.
 
 
 
@@ -36,28 +37,28 @@ RaizQA 🌱 es una aplicacion de analisis cualitativo escrita en Python con PySi
 .
 |-- main.py
 |-- requirements.txt
-|-- RaizQA.spec
+|-- main.spec
 |-- RaizQA_macos.spec
 |-- core/
 |   |-- project.py
-|   `-- memos.py
+|   |-- logica.py
+|   `-- worker_objects.py
 |-- gui/
 |   |-- main_window.py
 |   |-- image_viewer.py
 |   |-- theme.py
-|   |-- document_tree.py
-|   |-- code_tree.py
+|   |-- widgets/
 |   `-- dialogs/
 |-- code_viewer/
-|   `-- code_viewer.py
+|-- tests/
 |-- data/
-|-- memos/
 `-- models/
 ```
 
 ## Notas de mantenimiento
 
-- `main.py` + `gui/main_window.py` representan la aplicacion activa.
+- RaizQA utiliza un diseño MVC: `core/project.py` (Modelo) y `core/logica.py` (Controlador central), dejando la interfaz gráfica bajo `gui/` (Vista).
+- La persistencia es atómica a través de un único archivo de estado. Se descartó el uso de archivos divididos heredados.
 - Existen archivos historicos o de transicion como `gui_raizQA.py`, `gui_raizQA_pyside.py` y partes de `models/`. No son la ruta principal de ejecucion actual.
 
 ## Licencia

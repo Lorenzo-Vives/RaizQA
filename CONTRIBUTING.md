@@ -21,6 +21,11 @@ RaizQA is a desktop application built entirely with **Python** and **PySide6** (
    ```bash
    python main.py
    ```
+5. **Run tests**:
+   The project uses `pytest` for unit and integration testing. Run the test suite using:
+   ```bash
+   pytest tests/
+   ```
 
 ## 🏗️ Project Architecture & Logic
 
@@ -37,19 +42,20 @@ The frontend is responsible for everything the user interacts with, built using 
 **How to contribute to the Frontend:**
 *   **Add new modular widgets**: When adding new UI elements, build them as self-contained classes in `gui/widgets/` and embed them into `main_window.py`. Please avoid bloating `main_window.py`.
 *   **Add new analysis dialogs**: Create a new `QDialog` class in `gui/dialogs/` and hook it up to the main application.
-*   **UI/UX Polishing**: Improve the visual theme in `gui/theme.py` or enhance responsiveness and layouts.
+*   **UI/UX Polishing**: Improve the visual theme in `gui/theme.py` and `gui/styles.qss`, or enhance responsiveness and layouts. When adding new widgets, ensure they use the established style classes to maintain consistency.
 
 ### ⚙️ Backend (`core/`)
 The backend is completely local and file-based. It manages data persistence, file parsing, and business logic without needing a database server.
-*   **In-Memory Data Structures (EDDs)**: `core/project.py` maintains high-performance in-memory dictionaries (`codes_dict`, `themes_dict`, `texts_dict`). This allows for O(1) instant read times when querying coded fragments or searching through text, heavily optimizing the analysis process.
+*   **In-Memory Data Structures (EDDs)**: `core/project.py` maintains high-performance in-memory dictionaries (`codes_dict`, `themes_dict`, `texts_dict`). It supports sub-code hierarchies, allowing structured analysis. This allows for O(1) instant read times when querying coded fragments or searching through text, heavily optimizing the analysis process.
 *   **Atomic Persistence Logic**: Projects are stored in a standard folder structure containing JSON files (`project_data.json`, `edds_data.json`). The backend uses `PointerManager` for atomic saves, ensuring that even if the app crashes mid-save, the project state will not become corrupted.
 *   **Dynamic Text Synchronization (Diff-Match-Patch)**: When a document is edited by the user, the backend uses a `diff_match_patch` algorithm (with a `0.3` threshold tolerance) to automatically locate and resync the `start` and `end` indices of existing coded fragments. If a sentence is completely overwritten, the associated code fragment is silently purged to maintain data integrity.
 *   **Importing Logic**: Supported formats (TXT, PDF, DOCX, images) are parsed upon import. Text documents are converted into raw text strings and stored internally, while images are copied directly into the project's `/documentos` folder.
+*   **Collaboration & Merging**: Handled by `core/merge_manager.py`, `core/import_manager.py`, and `core/export_manager.py`, this logic allows multiple users to share and merge project codes seamlessly. Ensure any changes to EDDs are compatible with these collaborative features.
 
 **How to contribute to the Backend:**
 *   **Add new document formats**: Extend `core/project.py` to parse new file types (e.g., CSV or Markdown) and integrate them into the project structure.
 *   **Improve Export functionalities**: Help build better export handlers in `core/export_manager.py` (e.g., exporting to new formats like HTML or SPSS).
-*   **Data integrity & Testing**: Add unit tests for persistence and data transformations to ensure the JSON state never corrupts.
+*   **Data integrity & Testing**: The project uses `pytest`. All new features, especially core logic and data transformations, must pass existing tests and include new ones in the `tests/` directory to prevent regressions and ensure the JSON state never corrupts.
 
 ## 🔄 Contribution Workflow
 

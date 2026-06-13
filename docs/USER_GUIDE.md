@@ -209,7 +209,14 @@ Resume temas y categorias con:
 
 Permite definir casos, asignar documentos y revisar fragmentos por caso.
 
-## 13. Exportaciones
+## 13. Colaboración y Exportaciones
+
+### Menú Colaborar
+
+El menú **Colaborar** en la parte superior te permite trabajar en equipo:
+- **Exportar Proyecto**: Genera un archivo empaquetado de tu proyecto y codificaciones para compartir.
+- **Importar Proyecto**: Permite importar el proyecto empaquetado de un compañero.
+- **Merge (Fusionar) Proyectos**: Integra las codificaciones de un compañero en tu proyecto activo, resolviendo conflictos de forma inteligente sin pérdida de datos.
 
 ### Exportar codigos
 
@@ -229,11 +236,13 @@ La barra superior permite buscar texto en:
 
 Si hay coincidencias en documentos, RaizQA navega entre ellas.
 
-## 15. Guardado automatico
+## 15. Guardado automatico y Advertencias
 
 El proyecto se guarda automaticamente cada 30 segundos.
 
 Tambien puedes usar `Guardar Proyecto`.
+
+Si intentas cerrar la aplicación y tienes cambios sin guardar, aparecerá un aviso de advertencia para evitar que pierdas tu progreso.
 
 ## 16. Consejos practicos
 

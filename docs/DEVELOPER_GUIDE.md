@@ -1,36 +1,39 @@
 # Guia tecnica y de desarrollo
 
-## 1. Arquitectura general
+## 1. Arquitectura general (MVC)
+
+La aplicacion sigue un patrón **Model-View-Controller (MVC)**:
+
+- **Model (`core/project.py`)**: Maneja la persistencia y las Estructuras de Datos en Memoria (EDDs).
+- **View (`gui/`)**: Muestra la interfaz al usuario (`main_window.py`, `widgets/`, `dialogs/`) y envía señales.
+- **Controller (`core/logica.py`)**: Recibe señales de la vista, orquesta al modelo y a los workers asíncronos, y devuelve señales de actualización a la vista.
 
 La aplicacion activa parte en `main.py`:
 
 - crea `QApplication`
 - muestra `ReadmeDialog`
-- crea `RaizQAGUI`
-
-La mayor parte de la logica de interfaz y coordinacion vive en `gui/main_window.py`.
-
-Separacion principal:
-
-- `core/`: persistencia y utilidades de dominio
-- `gui/`: ventana principal, temas, arboles y dialogos
+- instancia el **Controller** (`ControladorLogico`) y la **Vista** (`RaizQAGUI`), conectando sus señales.
 - `code_viewer/`: visor de fragmentos codificados
 
 ## 2. Modulos clave
 
-### Entrada
+### Controlador y Workers
 
-- `main.py`
+- `core/logica.py`
+  - procesa las acciones del usuario
+  - emite señales Qt de vuelta a la UI
+- `core/worker_objects.py`
+  - hilos en segundo plano para importación, exportación y búsquedas
 
-### Persistencia
+### Persistencia y Modelo
 
 - `core/project.py`
   - crea estructura de proyecto
   - importa documentos
-  - carga y guarda `project_data.json`
-  - administra el diario
-- `core/memos.py`
-  - administra `memos.json`
+  - carga y guarda el estado unificado en `project_data.json` (junto con su backup `.bak`)
+  - administra el diario y los memos integrados
+- `core/merge_manager.py` (junto con `import_manager` y `export_manager`)
+  - maneja la fusión de códigos y colaboración en equipo
 
 ### UI principal
 
@@ -195,12 +198,19 @@ Instalacion:
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
+pip install pytest pytest-qt
 ```
 
 Ejecucion:
 
 ```bash
 python main.py
+```
+
+Ejecucion de pruebas automatizadas:
+
+```bash
+pytest tests/
 ```
 
 Verificacion de sintaxis:
@@ -215,12 +225,12 @@ python -m compileall .
 
 Spec activo:
 
-- `RaizQA.spec`
+- `main.spec`
 
 Comando:
 
 ```bash
-pyinstaller --clean RaizQA.spec
+pyinstaller --clean main.spec
 ```
 
 Salida:
@@ -248,13 +258,16 @@ pyinstaller --clean RaizQA_macos.spec
 
 ```text
 core/
-  persistencia del proyecto y memos
+  [Model/Controller] persistencia del proyecto, logica y colaboracion
 
 gui/
-  ventana principal, temas, arboles y dialogos
+  [View] ventana principal, estilos, temas, widgets modulares y dialogos
 
 code_viewer/
   visor especializado de fragmentos
+
+tests/
+  pruebas unitarias y de integracion (pytest)
 
 data/
   datos auxiliares del proyecto
@@ -299,15 +312,12 @@ Si se amplian, conviene extraerlas a modulos dedicados de exportacion.
 
 ## 13. Riesgos tecnicos actuales
 
-- `gui/main_window.py` concentra mucha logica y seria buen candidato a refactor por componentes.
-- Hay coexistencia de estructuras nuevas y legacy.
-- Los memos aparecen tanto en `memos.json` como dentro del estado del proyecto.
-- La app depende de reconstruccion de estado desde widgets en varias operaciones de guardado.
+- `gui/main_window.py` concentra todavía algo de lógica visual, pero está en proceso continuo de refactorización hacia `gui/widgets/`.
+- La app depende de reconstruccion de estado desde widgets en ciertas operaciones, aunque se avanza hacia una separación estricta.
 
 ## 14. Mejoras naturales futuras
 
 - documentar pruebas manuales por feature
-- agregar tests automatizados para persistencia y transformaciones de datos
 - extraer servicios de exportacion
 - consolidar modelos activos y legacy
 - agregar spec de Linux

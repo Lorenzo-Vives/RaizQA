@@ -1,5 +1,7 @@
 # Modelo de datos y persistencia
 
+La arquitectura actual sigue un patrón **MVC (Model-View-Controller)**, donde `core/project.py` y las Estructuras de Datos en Memoria (EDDs) actúan como el **Modelo**, y `core/logica.py` actúa como el **Controlador** que orquesta la persistencia y la lógica pesada.
+
 ## 1. Estructura de un proyecto
 
 Cada proyecto se crea dentro del Working Directory con esta estructura base:
@@ -11,15 +13,14 @@ Cada proyecto se crea dentro del Working Directory con esta estructura base:
     |-- codigos/
     |-- metadata.json
     |-- project_data.json
-    |-- memos.json
-    `-- diario.txt
+    `-- project_data.json.bak
 ```
 
 ## 2. Archivos principales
 
 ### `metadata.json`
 
-Se usa para compatibilidad y contiene como minimo:
+Se usa principalmente para compatibilidad e indexación básica:
 
 ```json
 {
@@ -30,29 +31,17 @@ Se usa para compatibilidad y contiene como minimo:
 
 ### `project_data.json`
 
-Es el estado principal del proyecto. Guarda:
+Es el estado principal unificado del proyecto y se guarda de forma atómica. Guarda todo:
 
-- `codes`
-- `documents`
-- `highlights`
-- `doc_groups`
-- `themes`
-- `case_studies`
+- `documents` y `highlights`
+- `codes_dict` (diccionario principal de códigos y subcódigos)
+- `themes_dict` (temas y categorías)
+- `memos_dict` (memos de la investigación)
+- `doc_groups` y `case_studies`
 
-### `memos.json`
+### `project_data.json.bak`
 
-Contiene memos asociados por nombre de codigo:
-
-```json
-{
-  "Identidad": "Memo del codigo",
-  "Territorio": "Otro memo"
-}
-```
-
-### `diario.txt`
-
-Guarda el texto libre del diario de codificacion.
+Es el respaldo atómico generado automáticamente por el proceso de guardado para evitar corrupción de datos en caso de fallo durante la escritura.
 
 ## 3. Documento
 
@@ -70,7 +59,7 @@ Reglas actuales:
 
 ## 4. Estructura de codigo
 
-Cada codigo en `project_data.json` sigue este esquema general:
+Cada codigo en `project_data.json` sigue este esquema general. Ahora soporta **jerarquía de sub-códigos** de manera nativa:
 
 ```json
 {
@@ -215,13 +204,13 @@ Uso:
 
 ## 11. Compatibilidades y observaciones
 
-- Hay una coexistencia entre memo por codigo dentro de `project_data.json` y `memos.json`.
-- La ruta activa de la aplicacion usa `core/project.py` y `core/memos.py`.
-- Existen modulos historicos en `models/` y archivos antiguos que no son la ruta principal actual.
+- Archivos heredados como `memos.json` o `diario.txt` ya **no se usan**. Si existen, solo se leen como mecanismo de migración hacia `project_data.json` al cargar proyectos antiguos.
+- Existen modulos historicos en el directorio `models/` que han sido completamente reemplazados por el patrón MVC de `core/`. No forman parte de la ruta principal actual.
+- Se ha implementado una lógica de guardado atómico que garantiza que `project_data.json` nunca se corrompa, apoyándose en la creación temporal y renombrado con `project_data.json.bak`.
 
-## 12. Modulos responsables
+## 12. Modulos responsables (MVC)
 
-- Persistencia del proyecto: `core/project.py`
-- Persistencia de memos: `core/memos.py`
-- Vista principal y reconstruccion de estado: `gui/main_window.py`
-- Visor de imagenes y overlays: `gui/image_viewer.py`
+- **Modelo**: `core/project.py` (Persistencia unificada en `project_data.json` y EDDs).
+- **Controlador**: `core/logica.py` (Maneja las peticiones asíncronas, coordina el modelo y envía señales a la vista).
+- **Vista**: `gui/main_window.py` (Recepción de señales y reconstrucción visual del estado) y `gui/widgets/`.
+- Fusión y Colaboración: `core/merge_manager.py`, `core/import_manager.py`, `core/export_manager.py`
