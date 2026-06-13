@@ -31,7 +31,7 @@ from gui.dialogs.loading_dialog import LoadingDialog
 from gui.document_tree import DocumentTree
 from gui.code_tree import CodeTree
 from gui.image_viewer import ImageDocumentViewer
-from code_viewer.code_viewer import CodeViewerWindow  # Absolute import desde root
+from gui.dialogs.code_viewer_window import CodeViewerWindow  # Absolute import desde root
 from core.project import Project
 from gui.theme import get_theme
 

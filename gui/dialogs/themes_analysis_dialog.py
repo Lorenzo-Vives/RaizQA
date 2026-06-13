@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QSplitter,
 )
 
-from code_viewer.code_viewer import CodeViewerWindow
+from gui.dialogs.code_viewer_window import CodeViewerWindow
 
 
 class ThemesAnalysisDialog(QDialog):

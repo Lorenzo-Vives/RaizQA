@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QTextEdit,
 )
 
-from code_viewer.code_viewer import CodeViewerWindow
+from gui.dialogs.code_viewer_window import CodeViewerWindow
 from gui.dialogs.case_setup_dialog import CaseSetupDialog
 
 
