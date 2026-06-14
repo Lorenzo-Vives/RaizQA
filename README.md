@@ -37,7 +37,7 @@ RaizQA 🌱 es una aplicacion de analisis cualitativo escrita en Python con PySi
 .
 |-- main.py
 |-- requirements.txt
-|-- main.spec
+|-- RaizQA.spec
 |-- RaizQA_macos.spec
 |-- core/
 |   |-- project.py

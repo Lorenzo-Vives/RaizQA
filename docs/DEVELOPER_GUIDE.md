@@ -225,12 +225,12 @@ python -m compileall .
 
 Spec activo:
 
-- `main.spec`
+- `RaizQA.spec`
 
 Comando:
 
 ```bash
-pyinstaller --clean main.spec
+pyinstaller --clean RaizQA.spec
 ```
 
 Salida:
