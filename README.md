@@ -62,4 +62,10 @@ RaizQA 🌱 es una aplicacion de analisis cualitativo escrita en Python con PySi
 
 ## Licencia
 
-MIT License.
+RaizQA se distribuye bajo los términos de la Licencia MIT, sujeta a una restricción de no comercialización basada en la Commons Clause.
+
+Esto significa que puedes usar, copiar, modificar y distribuir el software, siempre que no vendas, revendas, sublicencies ni ofrezcas el software o el acceso al software como un servicio comercial que compita sustancialmente con un producto o servicio comercial basado en RaizQA.
+
+El uso del software para investigación propia, académica o institucional —incluso con financiamiento— está permitido, siempre que el software en sí mismo no sea vendido como servicio comercial.
+
+Consulta el texto completo en el archivo `LICENSE.txt`.
