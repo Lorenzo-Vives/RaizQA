@@ -3,8 +3,19 @@
 RaizQA 🌱 es una aplicacion de analisis cualitativo escrita en Python con PySide6. Permite importar documentos de texto e imagen, crear codigos jerarquicos, registrar memos y diario de codificacion, explorar fragmentos y ejecutar vistas de analisis como comparacion de documentos, nube de palabras, temas/categorias, estudio de casos y Code Matrix Browser con heatmap.
 
 ## Instalación
-- Descarga la última versión: RaizQA v1.0piloto — https://github.com/Lorenzo-Vives/RaizQA/releases/download/v1.0piloto/RaizQA.exe 
+
+- Descarga la última versión: RaizQA v1.0piloto — https://github.com/Lorenzo-Vives/RaizQA/releases/download/v1.0piloto/RaizQA.exe
+
 ## ⚠️ Nota: Windows puede mostrar una advertencia. Usa “Más información” → “Ejecutar de todas formas”.
+
+### macOS
+
+- Usando la terminal [cmd + espacio] → escribe “Terminal” → Enter.
+- copia y pega el siguiente comando para descargar la última versión de RaizQA:
+
+```bash
+curl -s https://raw.githubusercontent.com/Lorenzo-Vives/RaizQA/main/install_mac.sh | bash
+```
 
 ## Funciones del software:
 
@@ -22,8 +33,6 @@ RaizQA 🌱 es una aplicacion de analisis cualitativo escrita en Python con PySi
 - Agrupacion de codigos en temas/categorias.
 - Estudio de casos basado en documentos y carpetas.
 - Trabajo en equipo: exportacion, importacion y fusion de proyectos.
-
-
 
 ## Documentacion
 

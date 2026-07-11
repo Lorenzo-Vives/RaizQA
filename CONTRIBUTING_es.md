@@ -7,6 +7,7 @@
 RaizQA es una aplicación de escritorio desarrollada completamente en **Python** y **PySide6** (Qt para Python).
 
 ### Configuración de tu entorno de desarrollo:
+
 1. **Haz un fork y clona** el repositorio.
 2. **Crea un entorno virtual**:
    ```bash
@@ -32,30 +33,36 @@ RaizQA es una aplicación de escritorio desarrollada completamente en **Python**
 Para contribuir de manera efectiva, es importante comprender cómo está estructurado RaizQA. La aplicación se divide a grandes rasgos en un **Frontend (Interfaz de Usuario)** y un **Backend (Lógica central y persistencia)**. Estamos en una transición activa hacia una estructura más modular, por lo que es vital seguir estos patrones.
 
 ### 🖥️ Frontend (`gui/` y `code_viewer/`)
+
 El frontend es responsable de todo aquello con lo que interactúa el usuario, construido utilizando PySide6.
-*   **`gui/main_window.py`**: El contenedor principal de la aplicación. Históricamente contenía la mayor parte de la lógica, pero actualmente se está refactorizando para que actúe estrictamente como un coordinador. Configura el diseño del espacio de trabajo, gestiona el estado global (p. ej., el proyecto activo actualmente) y enruta las señales Qt entre los widgets.
-*   **Widgets Modulares (`gui/widgets/`)**: Este es el nuevo hogar para los componentes modulares de la interfaz (p. ej., `actions_panel.py`, `document_editor.py`, `local_search.py`). **Todos los nuevos paneles y componentes de interfaz deben crearse aquí.** Estos componentes deben ser autónomos y comunicarse con la ventana principal mediante señales y slots (Signals and Slots) de PySide6.
-*   **`gui/dialogs/`**: Contiene ventanas emergentes modulares para funciones específicas (p. ej., `new_code_dialog.py`, `wordcloud_dialog.py`, `compare_dialog.py`).
-*   **`gui/image_viewer.py`**: Maneja la representación de imágenes, el zoom y el trazado de rectángulos de selección mediante `QGraphicsView`. Una lógica clave aquí es que **las coordenadas de selección se mapean a la resolución original de la imagen (`image_size`)**, garantizando que el zoom o el redimensionamiento de la ventana no desplacen las zonas codificadas.
-*   **Representación de Texto y Resaltado**: El texto del documento se muestra utilizando `QTextEdit`. Cuando un usuario selecciona texto y lo codifica, la interfaz captura los índices exactos de inicio (`start`) y fin (`end`) de la selección. Estos índices se utilizan para inyectar resaltados de fondo de color (overlays) directamente en el componente de texto.
+
+- **`gui/main_window.py`**: El contenedor principal de la aplicación. Históricamente contenía la mayor parte de la lógica, pero actualmente se está refactorizando para que actúe estrictamente como un coordinador. Configura el diseño del espacio de trabajo, gestiona el estado global (p. ej., el proyecto activo actualmente) y enruta las señales Qt entre los widgets.
+- **Widgets Modulares (`gui/widgets/`)**: Este es el nuevo hogar para los componentes modulares de la interfaz (p. ej., `actions_panel.py`, `document_editor.py`, `local_search.py`). **Todos los nuevos paneles y componentes de interfaz deben crearse aquí.** Estos componentes deben ser autónomos y comunicarse con la ventana principal mediante señales y slots (Signals and Slots) de PySide6.
+- **`gui/dialogs/`**: Contiene ventanas emergentes modulares para funciones específicas (p. ej., `new_code_dialog.py`, `wordcloud_dialog.py`, `compare_dialog.py`).
+- **`gui/image_viewer.py`**: Maneja la representación de imágenes, el zoom y el trazado de rectángulos de selección mediante `QGraphicsView`. Una lógica clave aquí es que **las coordenadas de selección se mapean a la resolución original de la imagen (`image_size`)**, garantizando que el zoom o el redimensionamiento de la ventana no desplacen las zonas codificadas.
+- **Representación de Texto y Resaltado**: El texto del documento se muestra utilizando `QTextEdit`. Cuando un usuario selecciona texto y lo codifica, la interfaz captura los índices exactos de inicio (`start`) y fin (`end`) de la selección. Estos índices se utilizan para inyectar resaltados de fondo de color (overlays) directamente en el componente de texto.
 
 **Cómo contribuir al Frontend:**
-*   **Añadir nuevos widgets modulares**: Al añadir nuevos elementos a la interfaz, constrúyelos como clases autónomas dentro de `gui/widgets/` e intégralos en `main_window.py`. Por favor, evita sobrecargar `main_window.py`.
-*   **Añadir nuevos diálogos de análisis**: Crea una nueva clase `QDialog` en `gui/dialogs/` y conéctala a la aplicación principal.
-*   **Pulido de UI/UX**: Mejora el tema visual en `gui/theme.py` y `gui/styles.qss`, o mejora la adaptabilidad y el diseño (layouts). Al añadir nuevos widgets, asegúrate de utilizar las clases de estilo establecidas para mantener la consistencia.
+
+- **Añadir nuevos widgets modulares**: Al añadir nuevos elementos a la interfaz, constrúyelos como clases autónomas dentro de `gui/widgets/` e intégralos en `main_window.py`. Por favor, evita sobrecargar `main_window.py`.
+- **Añadir nuevos diálogos de análisis**: Crea una nueva clase `QDialog` en `gui/dialogs/` y conéctala a la aplicación principal.
+- **Pulido de UI/UX**: Mejora el tema visual en `gui/theme.py` y `gui/styles.qss`, o mejora la adaptabilidad y el diseño (layouts). Al añadir nuevos widgets, asegúrate de utilizar las clases de estilo establecidas para mantener la consistencia.
 
 ### ⚙️ Backend (`core/`)
+
 El backend es completamente local y basado en archivos. Gestiona la persistencia de datos, el análisis sintáctico de archivos (parsing) y la lógica de negocio sin necesidad de un servidor de bases de datos.
-*   **Estructuras de Datos en Memoria (EDDs)**: `core/project.py` mantiene diccionarios en memoria de alto rendimiento (`codes_dict`, `themes_dict`, `texts_dict`). Soporta jerarquías de sub-códigos, permitiendo un análisis estructurado. Esto permite tiempos de lectura instantáneos O(1) al consultar fragmentos codificados o al buscar texto, optimizando enormemente el proceso de análisis.
-*   **Lógica de Persistencia Atómica**: Los proyectos se almacenan en una estructura de carpetas estándar que contiene archivos JSON (`project_data.json`, `edds_data.json`). El backend utiliza un `PointerManager` para guardados atómicos, asegurando que, incluso si la aplicación se bloquea a mitad de un guardado, el estado del proyecto no se corrompa.
-*   **Sincronización Dinámica de Texto (Diff-Match-Patch)**: Cuando el usuario edita un documento, el backend utiliza un algoritmo `diff_match_patch` (con una tolerancia de umbral de `0.3`) para localizar y resincronizar automáticamente los índices `start` y `end` de los fragmentos codificados existentes. Si una oración se sobrescribe por completo, el fragmento de código asociado se elimina silenciosamente para mantener la integridad de los datos.
-*   **Lógica de Importación**: Los formatos compatibles (TXT, PDF, DOCX, imágenes) se procesan al importarlos. Los documentos de texto se convierten en cadenas de texto sin formato y se almacenan internamente, mientras que las imágenes se copian directamente en la carpeta `/documentos` del proyecto.
-*   **Colaboración y Fusión (Merge)**: Gestionado por `core/merge_manager.py`, `core/import_manager.py` y `core/export_manager.py`, esta lógica permite a varios usuarios compartir y fusionar códigos de proyectos de forma fluida. Asegúrate de que cualquier cambio en EDDs sea compatible con estas funciones colaborativas.
+
+- **Estructuras de Datos en Memoria (EDDs)**: `core/project.py` mantiene diccionarios en memoria de alto rendimiento (`codes_dict`, `themes_dict`, `texts_dict`). Soporta jerarquías de sub-códigos, permitiendo un análisis estructurado. Esto permite tiempos de lectura instantáneos O(1) al consultar fragmentos codificados o al buscar texto, optimizando enormemente el proceso de análisis.
+- **Lógica de Persistencia Atómica**: Los proyectos se almacenan en una estructura de carpetas estándar que contiene archivos JSON (`project_data.json`, `edds_data.json`). El backend utiliza un `PointerManager` para guardados atómicos, asegurando que, incluso si la aplicación se bloquea a mitad de un guardado, el estado del proyecto no se corrompa.
+- **Sincronización Dinámica de Texto (Diff-Match-Patch)**: Cuando el usuario edita un documento, el backend utiliza un algoritmo `diff_match_patch` (con una tolerancia de umbral de `0.3`) para localizar y resincronizar automáticamente los índices `start` y `end` de los fragmentos codificados existentes. Si una oración se sobrescribe por completo, el fragmento de código asociado se elimina silenciosamente para mantener la integridad de los datos.
+- **Lógica de Importación**: Los formatos compatibles (TXT, PDF, DOCX, imágenes) se procesan al importarlos. Los documentos de texto se convierten en cadenas de texto sin formato y se almacenan internamente, mientras que las imágenes se copian directamente en la carpeta `/documentos` del proyecto.
+- **Colaboración y Fusión (Merge)**: Gestionado por `core/merge_manager.py`, `core/import_manager.py` y `core/export_manager.py`, esta lógica permite a varios usuarios compartir y fusionar códigos de proyectos de forma fluida. Asegúrate de que cualquier cambio en EDDs sea compatible con estas funciones colaborativas.
 
 **Cómo contribuir al Backend:**
-*   **Añadir nuevos formatos de documento**: Amplía `core/project.py` para procesar nuevos tipos de archivos (p. ej., CSV o Markdown) e intégralos en la estructura del proyecto.
-*   **Mejorar las funcionalidades de Exportación**: Ayuda a construir mejores manejadores de exportación en `core/export_manager.py` (p. ej., exportando a nuevos formatos como HTML o SPSS).
-*   **Integridad de Datos y Testing**: El proyecto utiliza `pytest`. Todas las nuevas funciones, especialmente la lógica central y las transformaciones de datos, deben pasar las pruebas existentes e incluir nuevas en el directorio `tests/` para prevenir regresiones y asegurar que el estado JSON nunca se corrompa.
+
+- **Añadir nuevos formatos de documento**: Amplía `core/project.py` para procesar nuevos tipos de archivos (p. ej., CSV o Markdown) e intégralos en la estructura del proyecto.
+- **Mejorar las funcionalidades de Exportación**: Ayuda a construir mejores manejadores de exportación en `core/export_manager.py` (p. ej., exportando a nuevos formatos como HTML o SPSS).
+- **Integridad de Datos y Testing**: El proyecto utiliza `pytest`. Todas las nuevas funciones, especialmente la lógica central y las transformaciones de datos, deben pasar las pruebas existentes e incluir nuevas en el directorio `tests/` para prevenir regresiones y asegurar que el estado JSON nunca se corrompa.
 
 ## 🔄 Flujo de Trabajo para Contribuir
 
