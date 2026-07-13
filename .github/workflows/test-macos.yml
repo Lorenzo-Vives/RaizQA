@@ -1,0 +1,104 @@
+name: Probar RaizQA en macOS
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  probar-macos:
+    name: Probar en ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-15
+          - macos-15-intel
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Descargar el repositorio
+        uses: actions/checkout@v6
+
+      - name: Preparar Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Validar los scripts de instalación
+        shell: bash
+        run: |
+          bash -n install_mac.sh
+          bash -n "RaizQALauncher.app/Contents/MacOS/RaizQA"
+
+      - name: Validar la aplicación de macOS
+        shell: bash
+        run: |
+          test -f main.py
+          test -f requirements.txt
+          test -f "RaizQALauncher.app/Contents/MacOS/RaizQA"
+          test -f "RaizQALauncher.app/Contents/Info.plist"
+
+          plutil -lint "RaizQALauncher.app/Contents/Info.plist"
+
+      - name: Probar el acceso directo del Escritorio
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/Desktop"
+
+          ln -sfn \
+            "$GITHUB_WORKSPACE/RaizQALauncher.app" \
+            "$RUNNER_TEMP/Desktop/RaizQA.app"
+
+          LINKED_SCRIPT="$RUNNER_TEMP/Desktop/RaizQA.app/Contents/MacOS/RaizQA"
+
+          SCRIPT_DIR="$(cd -P "$(dirname "$LINKED_SCRIPT")" && pwd)"
+          APP_ROOT="$(cd -P "$SCRIPT_DIR/../.." && pwd)"
+          PROJECT_ROOT="$(cd -P "$APP_ROOT/.." && pwd)"
+          REAL_WORKSPACE="$(cd -P "$GITHUB_WORKSPACE" && pwd)"
+
+          test "$PROJECT_ROOT" = "$REAL_WORKSPACE"
+
+          echo "El acceso directo apunta correctamente a:"
+          echo "$PROJECT_ROOT"
+
+      - name: Crear entorno virtual
+        shell: bash
+        run: |
+          python -m venv "$RUNNER_TEMP/raizqa-venv"
+
+          source "$RUNNER_TEMP/raizqa-venv/bin/activate"
+
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install -r requirements.txt
+
+      - name: Validar el código Python
+        shell: bash
+        run: |
+          source "$RUNNER_TEMP/raizqa-venv/bin/activate"
+
+          find . \
+            -path "./.git" -prune \
+            -o -name "*.py" -print0 \
+            | xargs -0 python -m py_compile
+
+      - name: Probar dependencias principales
+        shell: bash
+        run: |
+          source "$RUNNER_TEMP/raizqa-venv/bin/activate"
+
+          python - <<'PY'
+          import PySide6
+          import PyPDF2
+          import docx
+          import spellchecker
+          import openpyxl
+          import diff_match_patch
+
+          print("Dependencias principales importadas correctamente.")
+          PY
