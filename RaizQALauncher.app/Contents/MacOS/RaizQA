@@ -1,0 +1,84 @@
+#!/bin/bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+APP_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+PROJECT_ROOT="$(cd "$APP_ROOT/.." && pwd)"
+APP_SUPPORT_DIR="$HOME/Library/Application Support/RaizQA"
+VENV_DIR="$APP_SUPPORT_DIR/venv"
+LOG_FILE="$APP_SUPPORT_DIR/launcher.log"
+STAMP_FILE="$VENV_DIR/.requirements-installed"
+INSTALL_VERSION="2026-07-06-1"
+DEPENDENCIES=(
+    'PySide6>=6.7'
+    'PyPDF2>=3.0'
+    'python-docx>=0.8.11'
+    'pyspellchecker>=0.8.1'
+    'openpyxl>=3.1.2'
+    'diff-match-patch'
+)
+
+mkdir -p "$APP_SUPPORT_DIR"
+
+log() {
+    printf '%s\n' "$*" >> "$LOG_FILE"
+}
+
+alert_and_exit() {
+    local message="$1"
+    /usr/bin/osascript -e "display alert \"RaizQA\" message \"$message\" as critical" >/dev/null 2>&1 || true
+    exit 1
+}
+
+pick_python() {
+    if [[ -n "${RAIZQA_PYTHON:-}" && -x "${RAIZQA_PYTHON:-}" ]]; then
+        printf '%s' "$RAIZQA_PYTHON"
+        return 0
+    fi
+
+    local candidate
+    for candidate in \
+        "/opt/homebrew/bin/python3" \
+        "/usr/local/bin/python3" \
+        "/Library/Frameworks/Python.framework/Versions/Current/bin/python3"
+    do
+        if [[ -x "$candidate" ]]; then
+            printf '%s' "$candidate"
+            return 0
+        fi
+    done
+
+    if command -v python3 >/dev/null 2>&1; then
+        command -v python3
+        return 0
+    fi
+
+    return 1
+}
+
+if [[ ! -f "$PROJECT_ROOT/main.py" ]]; then
+    alert_and_exit "No se encontró main.py junto al lanzador."
+fi
+
+PYTHON_BIN="$(pick_python || true)"
+if [[ -z "$PYTHON_BIN" ]]; then
+    alert_and_exit "No se encontró Python 3. Instala Python 3 y vuelve a abrir RaizQA."
+fi
+
+log "Iniciando RaizQA desde $PROJECT_ROOT"
+log "Python: $PYTHON_BIN"
+
+if [[ ! -x "$VENV_DIR/bin/python" ]]; then
+    log "Creando entorno virtual en $VENV_DIR"
+    "$PYTHON_BIN" -m venv "$VENV_DIR" >> "$LOG_FILE" 2>&1 || alert_and_exit "No se pudo crear el entorno virtual. Revisa el registro."
+fi
+
+if [[ ! -f "$STAMP_FILE" || "$(cat "$STAMP_FILE" 2>/dev/null || true)" != "$INSTALL_VERSION" ]]; then
+    log "Instalando dependencias"
+    "$VENV_DIR/bin/python" -m pip install --upgrade pip setuptools wheel >> "$LOG_FILE" 2>&1 || alert_and_exit "No se pudo preparar pip. Revisa el registro."
+    "$VENV_DIR/bin/python" -m pip install "${DEPENDENCIES[@]}" >> "$LOG_FILE" 2>&1 || alert_and_exit "No se pudieron instalar las dependencias. Revisa el registro."
+    printf '%s' "$INSTALL_VERSION" > "$STAMP_FILE"
+fi
+
+cd "$PROJECT_ROOT"
+exec "$VENV_DIR/bin/python" "$PROJECT_ROOT/main.py" >> "$LOG_FILE" 2>&1
