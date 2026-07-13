@@ -16,8 +16,26 @@ RaizQA 🌱 es una aplicacion de analisis cualitativo escrita en Python con PySi
 - copia y pega el siguiente comando para descargar la última versión de RaizQA:
 
 ```bash
-curl -s https://raw.githubusercontent.com/Lorenzo-Vives/RaizQA/main/install_mac.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Lorenzo-Vives/RaizQA/main/install_mac.sh | bash
 ```
+La primera instalación puede tardar algunos minutos.
+
+* Si no tienes Git o Python instalados, ejecuta primero:
+
+```bash
+xcode-select --install
+```
+Luego instala Homebrew:
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+Finalmente, instala Python:
+
+```bash
+brew install python
+```
+Después, vuelve a ejecutar el comando de instalación de RaizQA.
 
 ### Linux 
 Para instalar RaizQA en Linux desde cero, clona el repositorio y monta un entorno virtual de Python siguiendo estos pasos:
