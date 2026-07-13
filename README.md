@@ -4,6 +4,8 @@ RaizQA 🌱 es una aplicacion de analisis cualitativo escrita en Python con PySi
 
 ## Instalación
 
+### Windows
+
 - Descarga la última versión: RaizQA v1.0piloto — https://github.com/Lorenzo-Vives/RaizQA/releases/download/v1.0piloto/RaizQA.exe
 
 ## ⚠️ Nota: Windows puede mostrar una advertencia. Usa “Más información” → “Ejecutar de todas formas”.
@@ -15,6 +17,28 @@ RaizQA 🌱 es una aplicacion de analisis cualitativo escrita en Python con PySi
 
 ```bash
 curl -s https://raw.githubusercontent.com/Lorenzo-Vives/RaizQA/main/install_mac.sh | bash
+```
+
+### Linux 
+Para instalar RaizQA en Linux desde cero, clona el repositorio y monta un entorno virtual de Python siguiendo estos pasos:
+```bash
+# 1. Clonar el repositorio del proyecto
+git clone https://github.com/Lorenzo-Vives/RaizQA.git
+
+# 2. Entrar a la carpeta del proyecto
+cd RaizQA
+
+# 3. Crear un entorno virtual
+python3 -m venv venv
+
+# 4. Activar el entorno virtual
+source venv/bin/activate
+
+# 5. Instalar las dependencias
+pip install -r requirements.txt
+
+# 6. Ejecutar la aplicación
+python main.py
 ```
 
 ## Funciones del software:
