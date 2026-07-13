@@ -7,16 +7,9 @@ PROJECT_ROOT="$(cd -P "$APP_ROOT/.." && pwd)"
 APP_SUPPORT_DIR="$HOME/Library/Application Support/RaizQA"
 VENV_DIR="$APP_SUPPORT_DIR/venv"
 LOG_FILE="$APP_SUPPORT_DIR/launcher.log"
-STAMP_FILE="$VENV_DIR/.requirements-installed"
-INSTALL_VERSION="2026-07-06-1"
-DEPENDENCIES=(
-    'PySide6>=6.7'
-    'PyPDF2>=3.0'
-    'python-docx>=0.8.11'
-    'pyspellchecker>=0.8.1'
-    'openpyxl>=3.1.2'
-    'diff-match-patch'
-)
+STAMP_FILE="$VENV_DIR/.requirements-hash"
+REQUIREMENTS_FILE="$PROJECT_ROOT/requirements.txt"
+
 
 mkdir -p "$APP_SUPPORT_DIR"
 
@@ -64,20 +57,40 @@ PYTHON_BIN="$(pick_python || true)"
 if [[ -z "$PYTHON_BIN" ]]; then
     alert_and_exit "No se encontró Python 3. Instala Python 3 y vuelve a abrir RaizQA."
 fi
+PYTHON_VERSION="$("$PYTHON_BIN" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+
+if ! "$PYTHON_BIN" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)'; then
+    alert_and_exit "RaizQA requiere Python 3.10 o superior. Se encontró Python $PYTHON_VERSION."
+fi
 
 log "Iniciando RaizQA desde $PROJECT_ROOT"
 log "Python: $PYTHON_BIN"
+log "Versión de Python: $PYTHON_VERSION"
 
 if [[ ! -x "$VENV_DIR/bin/python" ]]; then
     log "Creando entorno virtual en $VENV_DIR"
     "$PYTHON_BIN" -m venv "$VENV_DIR" >> "$LOG_FILE" 2>&1 || alert_and_exit "No se pudo crear el entorno virtual. Revisa el registro."
 fi
 
-if [[ ! -f "$STAMP_FILE" || "$(cat "$STAMP_FILE" 2>/dev/null || true)" != "$INSTALL_VERSION" ]]; then
+if [[ ! -f "$REQUIREMENTS_FILE" ]]; then
+    alert_and_exit "No se encontró requirements.txt."
+fi
+
+REQUIREMENTS_HASH="$(shasum -a 256 "$REQUIREMENTS_FILE" | awk '{print $1}')"
+INSTALLED_HASH="$(cat "$STAMP_FILE" 2>/dev/null || true)"
+
+if [[ "$INSTALLED_HASH" != "$REQUIREMENTS_HASH" ]]; then
     log "Instalando dependencias"
-    "$VENV_DIR/bin/python" -m pip install --upgrade pip setuptools wheel >> "$LOG_FILE" 2>&1 || alert_and_exit "No se pudo preparar pip. Revisa el registro."
-    "$VENV_DIR/bin/python" -m pip install "${DEPENDENCIES[@]}" >> "$LOG_FILE" 2>&1 || alert_and_exit "No se pudieron instalar las dependencias. Revisa el registro."
-    printf '%s' "$INSTALL_VERSION" > "$STAMP_FILE"
+
+    "$VENV_DIR/bin/python" -m pip install --upgrade pip setuptools wheel \
+        >> "$LOG_FILE" 2>&1 \
+        || alert_and_exit "No se pudo preparar pip. Revisa el registro."
+
+    "$VENV_DIR/bin/python" -m pip install -r "$REQUIREMENTS_FILE" \
+        >> "$LOG_FILE" 2>&1 \
+        || alert_and_exit "No se pudieron instalar las dependencias. Revisa el registro."
+
+    printf '%s' "$REQUIREMENTS_HASH" > "$STAMP_FILE"
 fi
 
 cd "$PROJECT_ROOT"
