@@ -1,7 +1,7 @@
 import os
 import shutil
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QSplitter,
     QListWidget, QListWidgetItem, QFileDialog, QMessageBox, QInputDialog, QFrame, QLineEdit, QSizeGrip,
     QTreeWidget, QTreeWidgetItem, QMenu, QDialog, QHeaderView, QTreeWidgetItemIterator,
     QGridLayout, QDialogButtonBox, QFileIconProvider, QAbstractItemView, QTextEdit,
@@ -435,7 +435,7 @@ class RaizQAGUI(QMainWindow):
             ("Seleccionar Working Directory", self.select_working_dir),
             ("Crear Proyecto", self.create_project),
             ("Abrir Proyecto", self.open_project),
-            ("Importar Archivo", self.import_file),
+            ("Importar Archivo(s)", self.import_file),
             ("Guardar Proyecto", self.save_project),
             ("Guardar Proyecto Como...", self.save_project_as),
             ("Exportar libro de códigos", self.export_code_tree),
@@ -1682,44 +1682,69 @@ class RaizQAGUI(QMainWindow):
         if not self.current_project:
             QMessageBox.warning(self, "Importar archivo", "Primero crea o abre un proyecto.")
             return
-        file_path, _ = QFileDialog.getOpenFileName(
+        file_paths, _ = QFileDialog.getOpenFileNames( # aqui simplemente se cambió getOpenFilename -> getOpenFileNames
             self,
-            "Seleccionar archivo",
+            "Seleccionar archivo(s)",
             "",
             "Documentos o imagenes (*.txt *.pdf *.docx *.png *.jpg *.jpeg *.bmp *.gif *.tiff)",
         )
-        if not file_path:
+        if not file_paths:
             return
 
-        try:
-            file_name, _ = self.current_project.import_document(file_path)
-        except ValueError as err:
-            QMessageBox.warning(self, "Importar archivo", str(err))
-            return
-        except Exception as err:
-            QMessageBox.critical(self, "Importar archivo", f"No se pudo procesar el archivo:\n{err}")
-            return
-
-        existing = self._all_documents()
         folder = self._current_folder_name()
-        new_item = None
-        if file_name not in existing:
-            self.doc_groups.setdefault(folder, []).append(file_name)
-            new_item = self._add_doc_item(file_name, self._find_folder_item(folder))
-        else:
-            found = self.doc_tree.findItems(file_name, Qt.MatchExactly | Qt.MatchRecursive, 0)
-            if found:
-                new_item = found[0]
+        imported = []
+        errors = []
+        last_item = None
 
-        self.current_doc = file_name
-        if new_item:
-            self.doc_tree.setCurrentItem(new_item)
-            self.display_document(new_item)
-        else:
-            self.display_document(self.doc_tree.currentItem())
-        self._rebuild_doc_groups_from_tree()
-        self.save_project()
-        QMessageBox.information(self, "Importar", f"Archivo '{file_name}' importado correctamente.")
+        # se importa luego cada documento seleccionado.
+        for file_path in file_paths:
+            try:
+                file_name, _ = self.current_project.import_document(file_path)
+            except ValueError as err:
+                errors.append((os.path.basename(file_path), str(err)))
+                continue
+            except Exception as err:
+                errors.append((os.path.basename(file_path), str(err)))
+                continue
+
+            existing = self._all_documents() # aca se verifican los dctos que se muestran en la GUI [no lo escritos]
+            if file_name not in existing:    # es decir, arriba se "cargan en el back" aqui se muestran en la gui.
+                self.doc_groups.setdefault(folder, []).append(file_name)
+                last_item = self._add_doc_item(file_name, self._find_folder_item(folder))
+            else:
+                found = self.doc_tree.findItems(file_name, Qt.MatchExactly | Qt.MatchRecursive, 0)
+                last_item = found[0] if found else last_item
+            imported.append(file_name)
+
+        if imported:
+            self.current_doc = imported[-1]
+            if last_item:
+                self.doc_tree.setCurrentItem(last_item)
+                self.display_document(last_item)
+            else:
+                self.display_document(self.doc_tree.currentItem())
+            self._rebuild_doc_groups_from_tree()
+            self.save_project()
+
+        self._show_import_summary(imported, errors)
+
+    def _show_import_summary(self, imported, errors):
+        if imported and not errors:
+            if len(imported) == 1:
+                QMessageBox.information(self, "Importar", f"Archivo '{imported[0]}' importado correctamente.")
+            else:
+                QMessageBox.information(self, "Importar", f"{len(imported)} archivos importados correctamente.")
+        elif imported and errors:
+            detalle = "\n".join(f"- {name}: {reason}" for name, reason in errors)
+            QMessageBox.warning(
+                self,
+                "Importar",
+                f"{len(imported)} archivo(s) importados correctamente.\n"
+                f"{len(errors)} archivo(s) no se pudieron importar:\n{detalle}",
+            )
+        elif errors:
+            detalle = "\n".join(f"- {name}: {reason}" for name, reason in errors)
+            QMessageBox.critical(self, "Importar", f"No se pudo importar ningún archivo:\n{detalle}")
 
 # -------------------- DOCUMENTO --------------------
     def display_document(self, current, previous=None):
