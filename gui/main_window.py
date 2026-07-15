@@ -858,7 +858,7 @@ class RaizQAGUI(QMainWindow):
 
         item = self.code_tree.itemAt(pos)
         code_name = self._code_item_name(item) if item else None
-        menu = QMenu()
+        menu = QMenu(self)
         add_code_action = menu.addAction("Agregar código")
         rename_action = None
         view_fragments_action = None
@@ -1857,7 +1857,7 @@ class RaizQAGUI(QMainWindow):
         selection_start = cursor.selectionStart()
         selection_end = cursor.selectionEnd()
         self._clear_column_selection()
-        menu = QMenu()
+        menu = QMenu(self)
 
         create_code_action = None
         create_subcode_action = None
@@ -1901,9 +1901,9 @@ class RaizQAGUI(QMainWindow):
     def _image_context_menu(self, scene_pos=None, global_pos=None, target_fragment=None):
         selection = self._image_selection_payload()
         has_selection = bool(selection and selection.get("rect"))
-        menu = QMenu()
         create_code_action = menu.addAction("Crear nuevo codigo para zona" if has_selection else "Crear nuevo codigo para imagen")
         create_subcode_action = menu.addAction("Crear subcodigo para zona" if has_selection else "Crear subcodigo para imagen")
+        menu = QMenu(self)
         if self.codes_dict:
             add_to_existing = menu.addMenu("Agregar a codigo existente")
             for code_name in self.codes_dict:
