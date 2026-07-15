@@ -2083,10 +2083,15 @@ class RaizQAGUI(QMainWindow):
         fragment_visual = fragment_data.copy()
         fragment_visual["color"] = color_hex
         fragment_visual["document"] = self.current_doc
-        self.highlight_fragment(fragment_visual, QColor(color_hex))
 
 
     def add_to_existing_code(self, code_name, selected_text, start, end, is_image=False, note=None, image_selection=None):
+        if is_image:
+            self.highlighted.append(fragment_visual)
+            self.restore_highlights()
+        else:
+            self.highlight_fragment(fragment_visual, QColor(color_hex))
+
         if not self.current_doc or code_name not in self.codes_dict:
             return
 
@@ -2113,7 +2118,11 @@ class RaizQAGUI(QMainWindow):
         fragment_visual = fragment_data.copy()
         fragment_visual["color"] = color_hex
         fragment_visual["document"] = self.current_doc
-        self.highlight_fragment(fragment_visual, QColor(color_hex))
+        if is_image:
+            self.highlighted.append(fragment_visual)
+            self.restore_highlights()
+        else:
+            self.highlight_fragment(fragment_visual, QColor(color_hex))
 
     def highlight_fragment(self, fragment, color=None):
         """Resalta un fragmento solo en su documento correspondiente."""
