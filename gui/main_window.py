@@ -252,13 +252,25 @@ class RaizQAGUI(QMainWindow):
         content_frame.setObjectName("ContentFrame")
         content_layout = QHBoxLayout(content_frame)
         content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(12)
+        content_layout.setSpacing(0)
 
-        left_layout = QVBoxLayout()
-        left_layout.setSpacing(12)
+        # Splitter horizontal: columna izquierda (docs+códigos) vs. visor de texto
+        main_splitter = QSplitter(Qt.Horizontal)
+        main_splitter.setObjectName("MainSplitter")
+        main_splitter.setChildrenCollapsible(False)
+        main_splitter.setHandleWidth(10)
+        content_layout.addWidget(main_splitter)
+
+        # Splitter vertical: documentos vs. árbol de códigos
+        left_splitter = QSplitter(Qt.Vertical)
+        left_splitter.setObjectName("LeftSplitter")
+        left_splitter.setChildrenCollapsible(False)
+        left_splitter.setHandleWidth(10)
 
         docs_card = QFrame()
         docs_card.setObjectName("PanelCard")
+        docs_card.setMinimumHeight(120)
+        docs_card.setMinimumWidth(220)
         docs_layout = QVBoxLayout(docs_card)
         docs_layout.setContentsMargins(12, 12, 12, 12)
         docs_layout.setSpacing(8)
@@ -290,10 +302,12 @@ class RaizQAGUI(QMainWindow):
         self.doc_tree.setDropIndicatorShown(True)
         self.doc_tree.setDefaultDropAction(Qt.MoveAction)
         docs_layout.addWidget(self.doc_tree, 50)
-        left_layout.addWidget(docs_card, 1)
+        left_splitter.addWidget(docs_card)
 
         code_card = QFrame()
         code_card.setObjectName("PanelCard")
+        code_card.setMinimumHeight(150)
+        code_card.setMinimumWidth(220)
         code_layout = QVBoxLayout(code_card)
         code_layout.setContentsMargins(12, 12, 12, 12)
         code_layout.setSpacing(8)
@@ -332,7 +346,10 @@ class RaizQAGUI(QMainWindow):
         self.code_tree.setDefaultDropAction(Qt.MoveAction)
         self.code_tree.setEditTriggers(QAbstractItemView.NoEditTriggers)
         code_layout.addWidget(self.code_tree, 60)
-        left_layout.addWidget(code_card, 2)
+        left_splitter.addWidget(code_card)
+        left_splitter.setStretchFactor(0, 1)
+        left_splitter.setStretchFactor(1, 2)
+        left_splitter.setSizes([220, 440])
 
         # Eventos
         self._code_tree_updating = False
@@ -343,10 +360,11 @@ class RaizQAGUI(QMainWindow):
         self.code_tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.code_tree.customContextMenuRequested.connect(self.code_tree_context_menu)
 
-        content_layout.addLayout(left_layout, 38)
+        main_splitter.addWidget(left_splitter)
 
         text_card = QFrame()
         text_card.setObjectName("PanelCard")
+        text_card.setMinimumWidth(300)
         text_layout = QVBoxLayout(text_card)
         text_layout.setContentsMargins(12, 12, 12, 12)
         text_layout.setSpacing(8)
@@ -392,7 +410,10 @@ class RaizQAGUI(QMainWindow):
         self.viewer_stack.addWidget(self.image_viewer)
 
         text_layout.addWidget(self.viewer_stack, 1)
-        content_layout.addWidget(text_card, 62)
+        main_splitter.addWidget(text_card)
+        main_splitter.setStretchFactor(0, 38)
+        main_splitter.setStretchFactor(1, 62)
+        main_splitter.setSizes([380, 620])
 
         # -------------------- BUSCADOR LOCAL MODULAR (CTRL+F) --------------------
         self.local_search_widget = LocalSearchWidget(self.text_area, parent=self)

@@ -124,6 +124,19 @@ QFrame#PanelCard {{
     border: 1px solid {border};
     border-radius: 10px;
 }}
+QSplitter::handle {{
+    background-color: transparent;
+}}
+QSplitter::handle:horizontal {{
+    width: 10px;
+}}
+QSplitter::handle:vertical {{
+    height: 10px;
+}}
+QSplitter::handle:hover {{
+    background-color: {selection};
+    border-radius: 3px;
+}}
 QFrame#TabBar {{
     background-color: {panel_bg};
     border: 1px solid {border};
