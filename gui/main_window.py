@@ -77,8 +77,8 @@ class RaizQAGUI(QMainWindow):
         super().__init__()
         self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
         self.setWindowTitle("RaizQA 🌱")
-        self.setGeometry(100, 100, 1000, 600)
-
+        self._apply_initial_geometry() # en lugar de setear un tamaño fijo
+                                       # se consulta tamaño de pantalla y se centra la ventana
         self.current_project = None
         self.memo_manager = None
         self.working_dir = None
@@ -639,6 +639,92 @@ class RaizQAGUI(QMainWindow):
             self.showNormal()
         else:
             self.showMaximized()
+
+    # -------------------- GEOMETRÍA / PANTALLAS --------------------
+    DEFAULT_SIZE = (1000, 600)
+    MIN_WINDOW_SIZE = (760, 480)
+
+    def _available_area(self):
+        """Área utilizable de la pantalla actual (excluye Dock, barra de menús, etc.)."""
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is None:
+            return None
+        return screen.availableGeometry()
+
+    def _apply_initial_geometry(self):
+        """
+        Dimensiona y centra la ventana dentro de la pantalla disponible.
+
+        La ventana es frameless: los botones de cerrar/minimizar y el QSizeGrip viven
+        dentro de ella, así que si la geometría se sale de la pantalla
+        quedan inalcanzables. Por eso el tamaño nunca supera el
+        área disponible.
+        """
+        area = self._available_area()
+        default_w, default_h = self.DEFAULT_SIZE
+        min_w, min_h = self.MIN_WINDOW_SIZE
+
+        if area is None:
+            self.setGeometry(100, 100, default_w, default_h)
+            return
+        
+        # aqui se elije entre el tamaño x defecto y el tamaño de la pantalla 
+        width = max(min(default_w, area.width()), min(min_w, area.width()))
+        height = max(min(default_h, area.height()), min(min_h, area.height()))
+        x = area.x() + (area.width() - width) // 2
+        y = area.y() + (area.height() - height) // 2
+        self.setGeometry(x, y, width, height)
+
+    def _ensure_within_screen(self):
+        """Reencuadra la ventana si quedo (parcial o totalmente) fuera del área visible."""
+        if self.isMaximized() or self.isFullScreen():
+            return
+        area = self._available_area()
+        if area is None:
+            return
+
+        geo = self.frameGeometry()
+        width = min(geo.width(), area.width())
+        height = min(geo.height(), area.height())
+        x = min(max(geo.x(), area.x()), area.x() + area.width() - width)
+        y = min(max(geo.y(), area.y()), area.y() + area.height() - height)
+
+        if (x, y, width, height) != (geo.x(), geo.y(), geo.width(), geo.height()):
+            self.setGeometry(x, y, width, height)
+
+    def _connect_screen_watchers(self):
+        """Reencuadra al conectar/desconectar un proyector o al cambiar la resolución."""
+        handle = self.windowHandle()
+        if handle is not None:
+            handle.screenChanged.connect(self._on_screen_changed)
+        self._watch_screen(self.screen())
+
+    def _watch_screen(self, screen):
+        previous = getattr(self, "_watched_screen", None)
+        if previous is screen:
+            return
+        if previous is not None:
+            try:
+                previous.availableGeometryChanged.disconnect(self._on_available_geometry_changed)
+            except (RuntimeError, TypeError):
+                pass
+        self._watched_screen = screen
+        if screen is not None:
+            screen.availableGeometryChanged.connect(self._on_available_geometry_changed)
+
+    def _on_screen_changed(self, screen):
+        self._watch_screen(screen)
+        self._ensure_within_screen()
+
+    def _on_available_geometry_changed(self, _geometry):
+        self._ensure_within_screen()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not getattr(self, "_screen_watchers_ready", False):
+            self._screen_watchers_ready = True
+            self._connect_screen_watchers()
+        self._ensure_within_screen()
 
     # -------------------- BÚSQUEDA GLOBAL --------------------
     def _update_search_label(self):
@@ -1505,6 +1591,8 @@ class RaizQAGUI(QMainWindow):
                         return True
             elif event.type() == QEvent.MouseButtonRelease:
                 self._drag_pos = None
+                # Evita dejar la barra de título (y sus botones) fuera de la pantalla
+                self._ensure_within_screen()
                 return True
         if obj is self.text_area:
             if event.type() == QEvent.MouseButtonPress:
