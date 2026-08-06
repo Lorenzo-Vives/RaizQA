@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import (QAction, QColor, QTextCursor, QTextCharFormat, QPainter, QPixmap, QIcon, QPalette,
                            QShortcut, QKeySequence)
 from PySide6.QtCore import Qt, QTimer, QPoint, QEvent, Signal
-from docx import Document
 
 from gui.widgets.local_search import LocalSearchWidget
 from gui.widgets.document_editor import DocumentEditorController
@@ -32,7 +31,7 @@ from gui.document_tree import DocumentTree
 from gui.code_tree import CodeTree
 from gui.image_viewer import ImageDocumentViewer
 from gui.dialogs.code_viewer_window import CodeViewerWindow  # Absolute import desde root
-from core.project import Project
+from core.constants import IMAGE_EXTENSIONS
 from gui.theme import get_theme
 
 class RaizQAGUI(QMainWindow):
@@ -43,13 +42,26 @@ class RaizQAGUI(QMainWindow):
     signal_req_export_diary = Signal(str, str, str)
     signal_req_export_code_tree = Signal(list, str)
     signal_req_export_code_fragments = Signal(list, list, str)
-    signal_req_set_project = Signal(object)
-    
+
     signal_req_export_project = Signal(str)
     signal_req_import_project = Signal(str, str)
     signal_req_export_exchange = Signal(list, list, dict, str)
     signal_req_import_exchange = Signal(str, dict)
     signal_req_merge_projects = Signal(str, dict)
+
+    # SEÑALES DE GESTIÓN DE PROYECTO / DOCUMENTOS / GRUPOS
+    signal_req_save_project = Signal()
+    signal_req_create_project = Signal(str, str)      # name, working_dir
+    signal_req_open_project = Signal(str, str)        # name, working_dir
+    signal_req_import_document = Signal(str, str)     # file_path, folder
+    signal_req_add_group = Signal(str)                # group_name
+    signal_req_move_document = Signal(str, str)       # doc_name, target_folder
+    signal_req_sync_doc_groups = Signal(dict)         # doc_groups completo
+    signal_req_sync_code_hierarchy = Signal(dict)     # {code_name: parent_name|None}
+    signal_req_sync_themes = Signal(list)             # lista de temas/categorías
+    signal_req_save_case_studies = Signal(list)       # lista de estudios de caso
+    signal_req_set_memo = Signal(str, str)            # code_name, memo_text
+    signal_req_delete_memo = Signal(str)              # code_name
 
     # SEÑALES CRUD EDDs
     signal_req_add_code = Signal(str, str, str, str) # code_label, hexcolor, memo, parent_name
@@ -57,9 +69,7 @@ class RaizQAGUI(QMainWindow):
     signal_req_update_code = Signal(str, str, str, str)
     signal_req_add_fragment = Signal(str, str, object)
     signal_req_update_document = Signal(str, str)
-    signal_req_save_all = Signal(dict)
-    
-    AUTO_SAVE_INTERVAL = 30000
+
     COLOR_PALETTE = [
         ("Amarillo", "#ffcc00"),
         ("Coral", "#ff7043"),
@@ -87,9 +97,7 @@ class RaizQAGUI(QMainWindow):
         # Cachés locales de las EDDs para que los diálogos los lean rápido
         self.codes_dict = {}
         self.themes_dict = {}
-        
-        self.code_themes = []
-        self.case_studies = []
+
         self.highlights = {}        # todos los subrayados por documento
         self.highlighted = []       # subrayados del documento actual
 
@@ -109,7 +117,12 @@ class RaizQAGUI(QMainWindow):
         self._codes_expanded = True
         self._image_selection_info = None
 
-        self.has_unsaved_changes = False
+        # Debounce de guardado del documento en edición: la Vista absorbe el
+        # ruido de cada tecla y solo llama al modelo cuando el usuario hace pausa.
+        self._doc_save_timer = QTimer(self)
+        self._doc_save_timer.setSingleShot(True)
+        self._doc_save_timer.timeout.connect(self._save_document_edit)
+        self._pending_doc_save = None  # (doc_name, text) a la espera de flush
 
         # -------------------- LAYOUT PRINCIPAL --------------------
         central_widget = QWidget()
@@ -384,7 +397,9 @@ class RaizQAGUI(QMainWindow):
         self.doc_editor_controller = DocumentEditorController(
             self.text_area, self.btn_edit_doc, self.btn_save_doc, self.btn_cancel_doc
         )
-        self.doc_editor_controller.signal_save_requested.connect(self.signal_req_update_document.emit)
+        # El botón "Guardar" fuerza un flush inmediato, sin esperar el debounce.
+        self.doc_editor_controller.signal_save_requested.connect(self._force_save_document_edit)
+        self.text_area.textChanged.connect(self._on_document_text_changed)
 
         self.image_viewer = ImageDocumentViewer(self)
         self.image_viewer.selectionChanged.connect(self._on_image_selection_changed)
@@ -419,10 +434,6 @@ class RaizQAGUI(QMainWindow):
         content_wrapper_layout.addLayout(resize_row)
 
         main_layout.addWidget(content_wrapper, 1)
-
-        self.auto_save_timer = QTimer(self)
-        self.auto_save_timer.timeout.connect(self.auto_save)
-        self.auto_save_timer.start(self.AUTO_SAVE_INTERVAL)
 
         self.apply_theme()
         self._refresh_options_menu()
@@ -535,14 +546,23 @@ class RaizQAGUI(QMainWindow):
             self.actions_panel.btn_teamwork.setEnabled(False)
             self._show_loading_dialog("Combinar Proyectos", "Respaldando y combinando proyectos, por favor espera...")
 
-    def handle_project_merged(self):
+    def handle_project_merged(self, summary):
         self._close_loading_dialog()
         self.actions_panel.btn_teamwork.setText("Colaborar 🫂 ▼")
         self.actions_panel.btn_teamwork.setEnabled(True)
-        
-        QMessageBox.information(self, "Combinar Proyectos", "Los proyectos se combinaron exitosamente.")
-        
-        self.signal_req_set_project.emit(self.current_project)
+
+        message = (
+            f"Documentos añadidos: {len(summary.get('documents_added', []))}\n"
+            f"Documentos omitidos: {len(summary.get('documents_skipped', []))}\n"
+            f"Códigos nuevos: {len(summary.get('codes_added', []))}\n"
+            f"Códigos fusionados: {len(summary.get('codes_merged', []))}\n"
+            f"Fragmentos añadidos: {summary.get('fragments_added', 0)}\n"
+            f"Fragmentos duplicados omitidos: {summary.get('fragments_duplicated', 0)}\n"
+            f"Estudios de caso añadidos: {summary.get('case_studies_added', 0)}\n"
+            f"Entradas de diario añadidas: {summary.get('diary_entries_added', 0)}\n"
+            f"Respaldo generado en: {summary.get('backup_path', '')}"
+        )
+        QMessageBox.information(self, "Combinar Proyectos", message)
         self.load_project()
 
     def export_project_rex(self):
@@ -551,8 +571,12 @@ class RaizQAGUI(QMainWindow):
             return
             
         self._rebuild_doc_groups_from_tree()
+        themes_list = [
+            {"name": name, "memo": data.get("memo", ""), "codes": data.get("codes", [])}
+            for name, data in self.themes_dict.items()
+        ]
         from gui.dialogs.export_exchange_wizard import ExportExchangeWizard
-        wizard = ExportExchangeWizard(self.current_project, self.doc_groups, self.code_themes, self)
+        wizard = ExportExchangeWizard(self.current_project, self.doc_groups, themes_list, self)
         if wizard.exec():
             data = wizard.get_export_data()
             if not data["documents"] and not data["codes"]:
@@ -604,14 +628,9 @@ class RaizQAGUI(QMainWindow):
         self._close_loading_dialog()
         self.actions_panel.btn_teamwork.setText("Colaborar 🫂 ▼")
         self.actions_panel.btn_teamwork.setEnabled(True)
-        
+
         project_name = os.path.basename(project_path)
-        self.current_project = Project(project_name, self.working_dir)
-        self.memo_manager = self.current_project.memo_manager
-        self.lbl_project.setText(f"Proyecto: {self.current_project.name}")
-        self.reset_project_state()
-        self.signal_req_set_project.emit(self.current_project)
-        self.load_project()
+        self.signal_req_open_project.emit(project_name, self.working_dir)
 
     def _show_loading_dialog(self, title, message):
         self.progress_dialog = LoadingDialog(title, message, self)
@@ -711,16 +730,12 @@ class RaizQAGUI(QMainWindow):
         QMessageBox.information(self, "Buscar", message)
 
     def handle_edds_updated(self, codes_dict, themes_dict):
-        """El Backend nos avisa que las EDDs cambiaron. Actualizamos cachés y repintamos la UI."""
-        print(f"DEBUG: edds_updated received. codes_dict keys: {list(codes_dict.keys())}")
-        for k, v in codes_dict.items():
-            print(f"DEBUG: code {k} -> {v}")
+        """El Backend nos avisa que las EDDs cambiaron (ya persistidas vía @autosave). Actualizamos cachés y repintamos la UI."""
         self.codes_dict = codes_dict
         self.themes_dict = themes_dict
         # Deferimos la reconstrucción del árbol al siguiente ciclo del event loop
         # para evitar un Segmentation Fault al limpiar la UI desde un handler de señal activo.
         QTimer.singleShot(0, self.populate_code_tree)
-        self.save_project() # Guarda todo el estado en un único JSON
 
     def populate_code_tree(self):
         """Reconstruye el árbol de códigos aplicando temas/categorías jerárquicamente."""
@@ -741,10 +756,9 @@ class RaizQAGUI(QMainWindow):
                     add_subcodes(child_item, child_name)
 
         # 1. Crear los nodos padre (Carpetas de Temas)
-        for theme in getattr(self, "code_themes", []):
-            theme_name = theme.get("name", "Tema sin nombre")
-            theme_codes = theme.get("codes", [])
-            
+        for theme_name, theme_data in self.themes_dict.items():
+            theme_codes = theme_data.get("codes", [])
+
             theme_item = QTreeWidgetItem([theme_name, "", ""])
             theme_item.setData(0, Qt.UserRole, "theme")  # Marcador para diferenciarlo
             theme_item.setIcon(0, self.icon_provider.icon(QFileIconProvider.Folder))
@@ -835,15 +849,16 @@ class RaizQAGUI(QMainWindow):
 
     def apply_theme(self):
         from gui import theme
-        theme.apply_theme_to_window(self, self.is_dark_mode)
+        is_dark_mode = self.is_dark_mode
+        theme.apply_theme_to_window(self, is_dark_mode)
 
-        current_theme_dict = theme.get_theme(self.is_dark_mode)
+        current_theme_dict = theme.get_theme(is_dark_mode)
         
         if hasattr(self, "actions_panel"):
-            self.actions_panel.update_theme_icon(self.is_dark_mode)
+            self.actions_panel.update_theme_icon(is_dark_mode)
 
         if hasattr(self, "local_search_widget"):
-            self.local_search_widget.update_theme(current_theme_dict, self.is_dark_mode)
+            self.local_search_widget.update_theme(current_theme_dict, is_dark_mode)
 
         self.image_viewer.apply_theme(current_theme_dict)
         
@@ -931,18 +946,15 @@ class RaizQAGUI(QMainWindow):
         memo_text = self.memo_manager.get_memo(code_name)
         dialog = MemoDialog(code_name, memo_text)
         if dialog.exec() == QDialog.Accepted:
-            new_text = dialog.get_memo()
-            self.memo_manager.add_or_update_memo(code_name, new_text)
-            self.update_memo_icon(code_name, has_memo=bool(new_text.strip()))
-            self.save_project()
-            QMessageBox.information(self, "Memo guardado", f"Memo actualizado para '{code_name}'.")
+            self.signal_req_set_memo.emit(code_name, dialog.get_memo())
 
     def delete_memo(self, code_name):
         if not self.memo_manager:
             return
-        self.memo_manager.delete_memo(code_name)
-        self.update_memo_icon(code_name, has_memo=False)
-        self.save_project()
+        self.signal_req_delete_memo.emit(code_name)
+
+    def handle_memo_updated(self, code_name, memo_text):
+        self.update_memo_icon(code_name, has_memo=bool(memo_text.strip()))
 
     def delete_document(self, doc_item):
         if not doc_item or doc_item.data(0, Qt.UserRole) != "doc":
@@ -964,8 +976,9 @@ class RaizQAGUI(QMainWindow):
             except Exception as exc:
                 QMessageBox.critical(self, "Eliminar documento", f"No se pudo eliminar el archivo:\n{exc}")
                 return
+            # resincronizamos la copia local para el árbol.
+            self.doc_groups = self.current_project.group_manager.groups
 
-        self._remove_doc_from_groups(doc_name)
         parent = doc_item.parent()
         if parent:
             parent.removeChild(doc_item)
@@ -982,8 +995,6 @@ class RaizQAGUI(QMainWindow):
 
         self.highlights.pop(doc_name, None)
 
-        self._rebuild_doc_groups_from_tree()
-        self.save_project()
         QMessageBox.information(self, "Eliminar documento", f"Documento '{doc_name}' eliminado del proyecto.")
 
     # -------------------- DIARIO --------------------
@@ -1005,7 +1016,7 @@ class RaizQAGUI(QMainWindow):
 
     def _update_all_extra_selections(self, search_selections=None):
         """
-        Unifica los resaltados: Este método evita que el resaltado de la búsqueda 
+        Este método evita que el resaltado de la búsqueda 
         borre el resaltado de la selección de columnas y viceversa.
         """
         if search_selections is not None:
@@ -1017,25 +1028,17 @@ class RaizQAGUI(QMainWindow):
 
     def show_code_fragments(self, item, column):
         code_name = self._code_item_name(item)
-        code = self.get_code_data(code_name)
+        hydrated_codes = self.get_hydrated_codes_dict()
+        code = hydrated_codes.get(code_name)
         if code and "fragments" in code:
             flat_frags = []
             for doc, frags in code["fragments"].items():
-                # Leer el documento 
-                doc_text = self.current_project.get_document_text(doc) if self.current_project else ""
-                
                 for f in frags:
                     f_copy = dict(f)
                     f_copy["document"] = doc
                     f_copy["type"] = f.get("type", "text")
-                    
-                    # INYECTAR EL TEXTO AQUÍ
-                    if "text" not in f_copy:
-                        start, end = f_copy.get("start", 0), f_copy.get("end", 0)
-                        f_copy["text"] = doc_text[start:end]
-                        
                     flat_frags.append(f_copy)
-                    
+
             dialog = CodeFragmentsDialog(code_name, flat_frags)
             dialog.exec()
 
@@ -1086,22 +1089,14 @@ class RaizQAGUI(QMainWindow):
             QMessageBox.warning(self, "Renombrar código", "Ya existe un código con ese nombre.")
             return
 
-        # 1. Recuperar los datos existentes ANTES de emitir la señal para no perderlos
+        # Recuperar los datos existentes ANTES de emitir la señal para no perderlos
         code_data = self.get_code_data(old_name)
         color_hex = code_data.get("hexcolor", "#fff59d") if code_data else "#fff59d"
         memo_text = code_data.get("memo", "") if code_data else ""
-        
-        # 2. Sincronizar con el gestor independiente de Memos (si el proyecto lo está usando)
-        if self.memo_manager:
-            old_memo = self.memo_manager.get_memo(old_name)
-            if old_memo:
-                memo_text = old_memo
-                self.memo_manager.add_or_update_memo(new_name, old_memo)
-                self.memo_manager.delete_memo(old_name)
 
         self._restore_code_item_label(item)
-        
-        # 3. Emitir la señal con todos los datos intactos (evitando usar None)
+
+        # La migración del memo (memo_manager) ya la resuelve Project.update_code en el backend.
         self.signal_req_update_code.emit(old_name, new_name, color_hex, memo_text)
 
     # -------------------- FUNCIONES BÁSICAS --------------------
@@ -1117,13 +1112,7 @@ class RaizQAGUI(QMainWindow):
             return
         name, ok = QInputDialog.getText(self, "Crear Proyecto", "Nombre del nuevo proyecto:")
         if ok and name:
-            self.current_project = Project(name, self.working_dir)
-            self.memo_manager = self.current_project.memo_manager
-            self.reset_project_state()
-            self.lbl_project.setText(f"Proyecto: {name}")
-            self.signal_req_set_project.emit(self.current_project)
-            QMessageBox.information(self, "Proyecto creado", f"Proyecto '{name}' creado exitosamente.")
-            self.save_project()
+            self.signal_req_create_project.emit(name, self.working_dir)
 
     def open_project(self):
         if not self.working_dir:
@@ -1135,25 +1124,24 @@ class RaizQAGUI(QMainWindow):
             return
         selected, ok = QInputDialog.getItem(self, "Abrir Proyecto", "Selecciona proyecto:", projects, 0, False)
         if ok and selected:
-            self.current_project = Project(selected, self.working_dir)
-            self.memo_manager = self.current_project.memo_manager
-            self.lbl_project.setText(f"Proyecto: {self.current_project.name}")
-            self.reset_project_state()
-            self.signal_req_set_project.emit(self.current_project)
-            self.load_project()
-            QMessageBox.information(self, "Proyecto abierto", f"Proyecto '{self.current_project.name}' abierto.")
+            self.signal_req_open_project.emit(selected, self.working_dir)
+
+    def handle_project_loaded(self, project):
+        """El controlador (logica.py) es el único dueño de la instancia Project."""
+        self.current_project = project
+        self.memo_manager = project.memo_manager
+        self.lbl_project.setText(f"Proyecto: {project.name}")
+        self.reset_project_state()
+        self.load_project()
 
     def reset_project_state(self):
         """Reinicia colecciones y widgets al cambiar de proyecto."""
-        self.has_unsaved_changes = False
         if self.current_project:
             self.setWindowTitle(f"RaizQA 🌱 - {self.current_project.name}")
         else:
             self.setWindowTitle("RaizQA 🌱")
         self.codes_dict = {}
         self.themes_dict = {}
-        self.code_themes = []
-        self.case_studies = []
         self.highlights = {}
         self.highlighted = []
         self.current_doc = None
@@ -1168,23 +1156,6 @@ class RaizQAGUI(QMainWindow):
         self._clear_column_selection()
         if hasattr(self, "code_search_field"):
             self.code_search_field.clear()
-
-    def save_project(self):
-        if not self.current_project:
-            return
-        self._rebuild_doc_groups_from_tree()
-        documents = self._all_documents()
-        state_data = {
-            "documents": documents,
-            "highlights": self.highlights,
-            "doc_groups": self.doc_groups,
-            "themes": getattr(self, "code_themes", []),
-            "case_studies": getattr(self, "case_studies", [])
-        }
-        self.signal_req_save_all.emit(state_data)
-        self.has_unsaved_changes = False
-        if self.current_project:
-            self.setWindowTitle(f"RaizQA 🌱 - {self.current_project.name}")
 
     def save_project_as(self):
         if not self.current_project:
@@ -1213,8 +1184,8 @@ class RaizQAGUI(QMainWindow):
             QMessageBox.warning(self, "Guardar como", "Ya existe un proyecto con ese nombre en la carpeta seleccionada.")
             return
 
-        # Guardar estado actual y copiar la carpeta del proyecto
-        self.save_project()
+        # Flush explícito antes de copiar (cada mutación ya autoguarda, esto es una garantía adicional)
+        self.current_project.save_state()
         try:
             shutil.copytree(self.current_project.path, target_path)
         except Exception as exc:
@@ -1222,12 +1193,8 @@ class RaizQAGUI(QMainWindow):
             return
 
         self.working_dir = base_dir
-        self.current_project = Project(new_name, base_dir)
-        self.memo_manager = self.current_project.memo_manager
         self.lbl_working_dir.setText(f"WD: {base_dir}")
-        self.lbl_project.setText(f"Proyecto: {new_name}")
-        self.reset_project_state()
-        self.load_project()
+        self.signal_req_open_project.emit(new_name, base_dir)
         QMessageBox.information(self, "Guardar como", f"Proyecto guardado como '{new_name}'.")
 
     def export_diary(self):
@@ -1264,34 +1231,31 @@ class RaizQAGUI(QMainWindow):
             self.actions_panel.btn_teamwork.setText("Teamwork 🫂 ▼")
             self.actions_panel.btn_teamwork.setEnabled(True)
         QMessageBox.critical(self, f"Exportar {export_type}", f"No se pudo exportar {export_type}:\n{error_msg}")
-
-
-    def auto_save(self):
-        self.save_project()
+        
+    def save_project(self):
+        if not self.current_project:
+            return
+        self.signal_req_save_project.emit()
+        
+    def handle_project_saved(self):
+        self.setWindowTitle(f"RaizQA 🌱 - {self.current_project.name}")
+        self.statusBar().showMessage("Proyecto guardado.", 3000)
 
     def load_project(self):
         if not self.current_project:
             return
 
-        data = self.current_project.load_project_data()
+        self.codes_dict = self.current_project.code_manager.get_all_codes()
+        self.themes_dict = self.current_project.theme_manager.get_all_themes()
+        self.highlights = self.current_project.annotation_manager.get_highlights()
 
-        self.code_themes = data.get("themes", [])
-        self.case_studies = data.get("case_studies", [])
-        self.highlights = data.get("highlights", {})
-
-        # Los diccionarios ya se cargaron en el proyecto, solo sincronizamos
-        self.codes_dict = self.current_project.codes_dict
-        self.themes_dict = self.current_project.themes_dict
-
-        # Ahora que los diccionarios tienen datos, limpiamos los árboles
         self.code_tree.clear()
         self.doc_tree.clear()
-        
-        self.doc_groups = data.get("doc_groups")
-        if not self.doc_groups:
-            documents = data.get("documents") or self.current_project.list_documents()
-            self.doc_groups = {"__root__": documents}
-            
+
+        self.doc_groups = self.current_project.group_manager.groups
+        if not self.doc_groups.get("__root__") and len(self.doc_groups) <= 1:
+            self.doc_groups = {"__root__": self.current_project.list_documents()}
+
         # Al ejecutar esto, display_document() se llamará para el primer archivo
         # y ya podrá leer correctamente los fragmentos desde self.codes_dict
         self._populate_doc_tree()
@@ -1352,7 +1316,7 @@ class RaizQAGUI(QMainWindow):
     def _is_image_document(self, doc_name):
         if not doc_name:
             return False
-        return doc_name.lower().endswith(tuple(Project.IMAGE_EXTENSIONS))
+        return doc_name.lower().endswith(tuple(IMAGE_EXTENSIONS))
 
     def _is_current_doc_image(self):
         return self._is_image_document(self.current_doc)
@@ -1393,7 +1357,24 @@ class RaizQAGUI(QMainWindow):
 
     def _on_doc_tree_drop(self):
         self._rebuild_doc_groups_from_tree()
-        self.save_project()
+        self.signal_req_sync_doc_groups.emit(self.doc_groups)
+    def _on_code_tree_drop(self):
+        hierarchy = {}
+        iterator = QTreeWidgetItemIterator(self.code_tree)
+        while iterator.value():
+            item = iterator.value()
+            if item.data(0, Qt.UserRole) == "code":
+                name = self._code_item_name(item)
+                parent_item = item.parent()
+                parent_name = (
+                    self._code_item_name(parent_item)
+                    if parent_item and parent_item.data(0, Qt.UserRole) == "code"
+                    else None
+                )
+                hierarchy[name] = parent_name
+            iterator += 1
+        self.signal_req_sync_code_hierarchy.emit(hierarchy)
+
 
     def _set_folder_icon(self, item):
         try:
@@ -1451,9 +1432,6 @@ class RaizQAGUI(QMainWindow):
             if parent and parent.data(0, Qt.UserRole) == "folder":
                 return parent.text(0)
         return "__root__"
-
-    def _rebuild_codes_from_tree(self):
-        pass
 
     def _configure_code_item(self, item):
         flags = item.flags()
@@ -1554,25 +1532,18 @@ class RaizQAGUI(QMainWindow):
         self._column_extra_selections = []
         self._prev_extra_selections = self.text_area.extraSelections()
         self._update_column_selection(pos)
-
-    def _update_column_selection(self, pos):
-        if not self._column_selecting or not self._column_start:
-            return
-        cursor = self.text_area.cursorForPosition(pos)
-        current_block = cursor.block()
-        current_pos_in_block = cursor.positionInBlock()
-
-        start_line, start_col = self._column_start
-        end_line = current_block.blockNumber()
-        end_col = current_pos_in_block
-
+        
+    
+    @staticmethod
+    def _calculate_selection_limits(start_line, start_col, end_line, end_col):
         first_line = min(start_line, end_line)
         last_line = max(start_line, end_line)
         col_left = min(start_col, end_col)
-        col_right = max(start_col, end_col)
         width = max(1, abs(end_col - start_col))
         col_right = col_left + width
-
+        return first_line, last_line, col_left, col_right, width
+    
+    def _create_extra_selections(self, first_line, last_line, col_left, col_right):
         doc = self.text_area.document()
         selections = []
 
@@ -1589,6 +1560,7 @@ class RaizQAGUI(QMainWindow):
             text = block.text()
             start_idx = min(col_left, len(text))
             end_idx = min(col_right, len(text))
+            
             selection = QTextEdit.ExtraSelection()
             c = QTextCursor(block)
             c.setPosition(block.position() + start_idx)
@@ -1596,6 +1568,21 @@ class RaizQAGUI(QMainWindow):
             selection.cursor = c
             selection.format = fmt
             selections.append(selection)
+            
+        return selections
+    
+    def _update_column_selection(self, pos):
+        if not self._column_selecting or not self._column_start:
+            return
+            
+        cursor = self.text_area.cursorForPosition(pos)
+        start_line, start_col = self._column_start
+        end_line = cursor.block().blockNumber()
+        end_col = cursor.positionInBlock()
+
+        first_line, last_line, col_left, col_right, width = self._calculate_selection_limits(
+            start_line, start_col, end_line, end_col
+        )
 
         self._column_selection_info = {
             "first_line": first_line,
@@ -1603,7 +1590,10 @@ class RaizQAGUI(QMainWindow):
             "col_left": col_left,
             "width": width,
         }
-        self._column_extra_selections = selections
+        
+        self._column_extra_selections = self._create_extra_selections(
+            first_line, last_line, col_left, col_right
+        )
         self._update_all_extra_selections()
 
     def _clear_column_selection(self):
@@ -1672,10 +1662,6 @@ class RaizQAGUI(QMainWindow):
             self.text_area.zoomIn(-self._zoom_level)
         self._zoom_level = 0
 
-    def _on_code_tree_drop(self):
-        self._rebuild_codes_from_tree()
-        self.save_project()
-
 
     # -------------------- IMPORTAR ARCHIVO --------------------
     def import_file(self):
@@ -1691,75 +1677,57 @@ class RaizQAGUI(QMainWindow):
         if not file_path:
             return
 
-        try:
-            file_name, _ = self.current_project.import_document(file_path)
-        except ValueError as err:
-            QMessageBox.warning(self, "Importar archivo", str(err))
-            return
-        except Exception as err:
-            QMessageBox.critical(self, "Importar archivo", f"No se pudo procesar el archivo:\n{err}")
-            return
-
-        existing = self._all_documents()
         folder = self._current_folder_name()
-        new_item = None
-        if file_name not in existing:
-            self.doc_groups.setdefault(folder, []).append(file_name)
-            new_item = self._add_doc_item(file_name, self._find_folder_item(folder))
-        else:
-            found = self.doc_tree.findItems(file_name, Qt.MatchExactly | Qt.MatchRecursive, 0)
-            if found:
-                new_item = found[0]
+        self.signal_req_import_document.emit(file_path, folder)
+
+    def handle_document_imported(self, file_name, folder, doc_groups):
+        self.doc_groups = doc_groups
+        found = self.doc_tree.findItems(file_name, Qt.MatchExactly | Qt.MatchRecursive, 0)
+        new_item = found[0] if found else self._add_doc_item(file_name, self._find_folder_item(folder))
 
         self.current_doc = file_name
-        if new_item:
-            self.doc_tree.setCurrentItem(new_item)
-            self.display_document(new_item)
-        else:
-            self.display_document(self.doc_tree.currentItem())
-        self._rebuild_doc_groups_from_tree()
-        self.save_project()
+        self.doc_tree.setCurrentItem(new_item)
+        self.display_document(new_item)
         QMessageBox.information(self, "Importar", f"Archivo '{file_name}' importado correctamente.")
 
 # -------------------- DOCUMENTO --------------------
     def display_document(self, current, previous=None):
         if not current or current.data(0, Qt.UserRole) != "doc":
             return
+        
+        if self._pending_doc_save:
+            self._doc_save_timer.stop()
+            self._save_document_edit()
 
-        #  1. Guardar los subrayados del documento anterior
-        if self.current_doc is not None:
-            self.save_current_highlights()
-
-        #  2. Actualizar el documento actual
         self._clear_column_selection()
         self.current_doc = current.text(0)
-        
+
         if self.current_project:
             doc_path = self.current_project.get_document_path(self.current_doc)
             if self._is_image_document(self.current_doc):
                 # Desactivar editor si es imagen
-                self.doc_editor_controller.load_document(None, "") 
+                self.doc_editor_controller.load_document(None, "")
                 self._show_image_document(doc_path)
             else:
                 self._show_text_viewer()
                 text = self.current_project.read_document(self.current_doc)
+                # Bloqueamos señales al cargar el texto para que setPlainText no
+                # dispare el debounce de guardado como si fuera edición real del usuario.
+                self.text_area.blockSignals(True)
                 self.text_area.setPlainText(text)
-                
+                self.text_area.blockSignals(False)
+
                 self.doc_editor_controller.load_document(self.current_doc, text)
         else:
             self.text_area.clear()
             self.image_viewer.clear_image()
             self.doc_editor_controller.load_document(None, "")
 
-        #  3. Restaurar los subrayados del documento nuevo DIRECTAMENTE desde codes_dict
-        self.highlighted = []
-        for code_name, data in self.codes_dict.items():
-            for frag in data.get("fragments", {}).get(self.current_doc, []):
-                f_copy = dict(frag)
-                f_copy["color"] = data.get("hexcolor", "#fff59d")
-                f_copy["document"] = self.current_doc
-                f_copy["type"] = frag.get("type", "text")
-                self.highlighted.append(f_copy)
+        #  3. Restaurar los subrayados del documento nuevo delegando en el backend
+        self.highlighted = (
+            self.current_project.get_fragments_for_document(self.current_doc)
+            if self.current_project else []
+        )
 
         self.restore_highlights()
 
@@ -1770,6 +1738,27 @@ class RaizQAGUI(QMainWindow):
             return
         self._show_image_viewer()
         self.image_viewer.clear_selection()
+
+    def _on_document_text_changed(self):
+        """La Vista absorbe el ruido de cada tecla; el modelo solo recibe la pausa."""
+        if self.text_area.isReadOnly() or not self.current_doc:
+            return
+        self._pending_doc_save = (self.current_doc, self.text_area.toPlainText())
+        self._doc_save_timer.start(300)
+
+    def _save_document_edit(self):
+        """Se dispara 300ms después de la última pulsación: una sola llamada al modelo por pausa."""
+        if not self._pending_doc_save:
+            return
+        doc_name, text = self._pending_doc_save
+        self._pending_doc_save = None
+        self.signal_req_update_document.emit(doc_name, text)
+
+    def _force_save_document_edit(self, doc_name, text):
+        """Click explícito en 'Guardar': cancela el debounce pendiente y persiste ya mismo."""
+        self._doc_save_timer.stop()
+        self._pending_doc_save = None
+        self.signal_req_update_document.emit(doc_name, text)
 
     # -------------------- CARPETAS / DOCUMENTOS --------------------
     def doc_tree_context_menu(self, pos):
@@ -1799,11 +1788,12 @@ class RaizQAGUI(QMainWindow):
         if name in self.doc_groups:
             QMessageBox.information(self, "Carpeta", "Ya existe una carpeta con ese nombre.")
             return
-        self.doc_groups[name] = []
+        self.signal_req_add_group.emit(name)
+
+    def handle_group_added(self, name, doc_groups):
+        self.doc_groups = doc_groups
         folder_item = self._ensure_folder_item(name)
         self.doc_tree.setCurrentItem(folder_item)
-        self._rebuild_doc_groups_from_tree()
-        self.save_project()
 
     def move_document_to_folder(self, doc_item):
         if not doc_item or doc_item.data(0, Qt.UserRole) != "doc":
@@ -1816,14 +1806,16 @@ class RaizQAGUI(QMainWindow):
             return
 
         doc_name = doc_item.text(0)
-        self._remove_doc_from_groups(doc_name)
-        if target != "(Sin carpeta)":
-            self.doc_groups.setdefault(target, []).append(doc_name)
-            parent_item = self._ensure_folder_item(target)
-        else:
-            parent_item = None
+        target_folder = target if target != "(Sin carpeta)" else "__root__"
+        self.signal_req_move_document.emit(doc_name, target_folder)
 
-        # quitar de árbol actual
+    def handle_document_moved(self, doc_name, target_folder, doc_groups):
+        self.doc_groups = doc_groups
+        found = self.doc_tree.findItems(doc_name, Qt.MatchExactly | Qt.MatchRecursive, 0)
+        doc_item = found[0] if found else None
+        if not doc_item:
+            return
+
         if doc_item.parent():
             doc_item.parent().removeChild(doc_item)
         else:
@@ -1831,6 +1823,7 @@ class RaizQAGUI(QMainWindow):
             if idx >= 0:
                 self.doc_tree.takeTopLevelItem(idx)
 
+        parent_item = self._find_folder_item(target_folder) if target_folder != "__root__" else None
         if parent_item:
             parent_item.addChild(doc_item)
             parent_item.setExpanded(True)
@@ -1838,14 +1831,6 @@ class RaizQAGUI(QMainWindow):
             self.doc_tree.addTopLevelItem(doc_item)
 
         self.doc_tree.setCurrentItem(doc_item)
-        self._rebuild_doc_groups_from_tree()
-        self.save_project()
-
-    def _remove_doc_from_groups(self, name):
-        for folder, docs in self.doc_groups.items():
-            if name in docs:
-                docs.remove(name)
-                break
 
     # -------------------- CÓDIGOS --------------------
     def text_context_menu(self, pos):
@@ -1987,7 +1972,7 @@ class RaizQAGUI(QMainWindow):
 
     def add_code_from_toolbar(self):
         self.prompt_add_code()
-
+        
     def prompt_add_code(self, parent_item=None):
         if not self.current_project:
             QMessageBox.warning(self, "Agregar código", "Primero abre o crea un proyecto.")
@@ -2012,14 +1997,11 @@ class RaizQAGUI(QMainWindow):
             return
 
         self._color_index += 1
-        
+
         parent_name = ""
         if parent_item and parent_item.data(0, Qt.UserRole) == "code":
             parent_name = parent_item.data(0, Qt.UserRole + 1)
-            # Solo permitir un nivel de anidamiento
-            if self.codes_dict.get(parent_name, {}).get("parent") is not None:
-                parent_name = self.codes_dict[parent_name]["parent"]
-        
+
         # Emitir señal al backend con el memo incluido
         self.signal_req_add_code.emit(code_label, color_hex, memo, parent_name)
 
@@ -2052,13 +2034,9 @@ class RaizQAGUI(QMainWindow):
 
         self._color_index += 1
 
-        # 1. Crear el código en el backend
         parent_name = ""
         if parent_item and parent_item.data(0, Qt.UserRole) == "code":
             parent_name = parent_item.data(0, Qt.UserRole + 1)
-            # Solo permitir un nivel de anidamiento
-            if self.codes_dict.get(parent_name, {}).get("parent") is not None:
-                parent_name = self.codes_dict[parent_name]["parent"]
         self.signal_req_add_code.emit(code_label, color_hex, memo, parent_name)
         
         # 2. Construir el paquete de datos del fragmento
@@ -2169,26 +2147,24 @@ class RaizQAGUI(QMainWindow):
         b = int(primary.blue() * weight + secondary.blue() * inv)
         return QColor(r, g, b)
 
+    #CHECK: ENTENDER ESTO
     def _resolve_fragment_positions(self, fragment):
-        """Obtiene posiciones por texto si no existen offsets persistidos."""
+        """
+        Obtiene posiciones por texto
+        """
         snippet = fragment.get("text", "")
-        if not snippet:
+        if not snippet or not self.current_project or not self.current_doc:
             return None, None
-        doc_text = self.text_area.toPlainText()
-        start_pos = doc_text.find(snippet)
-        if start_pos == -1:
-            return None, None
-        end_pos = start_pos + len(snippet)
-        fragment["start"] = start_pos
-        fragment["end"] = end_pos
+        start_pos, end_pos = self.current_project.locate_fragment_by_text(self.current_doc, snippet)
+        if start_pos is not None:
+            fragment["start"] = start_pos
+            fragment["end"] = end_pos
         return start_pos, end_pos
 
+    #CHECK: QUIZA BORRAR
     def _get_code_color(self, fragment):
-        """Obtiene el color asociado al código padre de un fragmento."""
-        for code_name, data in self.codes_dict.items():
-            for doc, frags in data.get("fragments", {}).items():
-                if fragment in frags:
-                    return data.get("hexcolor", "#fff59d")
+        """El color ya viene dado por el origen del fragmento
+        (get_fragments_for_document, create_new_code, add_to_existing_code)."""
         return fragment.get("color", "#fff59d")
 
     def create_subcode(self, selected_text, start, end):
@@ -2222,28 +2198,11 @@ class RaizQAGUI(QMainWindow):
         return None
 
     def get_hydrated_codes_dict(self):
-            """Genera una copia de codes_dict inyectando el texto real de los fragmentos, 
-            para que los módulos externos puedan mostrar el texto sin fallar."""
+        """Delegado al backend: Project.get_hydrated_codes() inyecta el texto real de cada fragmento."""
+        if not self.current_project:
             import copy
-            hydrated = copy.deepcopy(self.codes_dict)
-            
-            if not self.current_project:
-                return hydrated
-                
-            for code_name, data in hydrated.items():
-                for doc_name, frags in data.get("fragments", {}).items():
-                    # Cargamos el texto completo del documento (con caché en memoria gracias a project.py)
-                    doc_text = self.current_project.get_document_text(doc_name)
-                    
-                    for frag in frags:
-                        if "text" not in frag:
-                            start = frag.get("start", 0)
-                            end = frag.get("end", 0)
-                            # Cortamos el string y creamos la llave "text" que espera la UI
-                            frag["text"] = doc_text[start:end]
-                            
-            return hydrated
-
+            return copy.deepcopy(self.codes_dict)
+        return self.current_project.get_hydrated_codes()
 
     # -------------------- VER CÓDIGOS --------------------
     def open_code_viewer(self):
@@ -2270,19 +2229,21 @@ class RaizQAGUI(QMainWindow):
 
     def open_themes_categories(self):
         if not self.current_project:
-            QMessageBox.information(self, "Temas y categorÃ­as", "Primero abre o crea un proyecto.")
+            QMessageBox.information(self, "Temas y categorías", "Primero abre o crea un proyecto.")
             return
         
-        # Solo enviar códigos principales a la ventana de temas, 
+        #CHECK: entender esto
+        # Solo enviar códigos principales a la ventana de temas,
         # ya que los subcódigos heredan el tema de su padre implícitamente
         codes = [name for name, data in self.codes_dict.items() if data.get("parent") is None]
-        
-        dialog = ThemesCategoriesDialog(codes, self.code_themes, parent=self)
-        if dialog.exec() == QDialog.Accepted:
-            self.code_themes = dialog.get_themes_data()
-            self.save_project()
+        themes_list = [
+            {"name": name, "memo": data.get("memo", ""), "codes": data.get("codes", [])}
+            for name, data in self.themes_dict.items()
+        ]
 
-            self.populate_code_tree()
+        dialog = ThemesCategoriesDialog(codes, themes_list, parent=self)
+        if dialog.exec() == QDialog.Accepted:
+            self.signal_req_sync_the2es.emit(dialog.get_themes_data())
 
     def open_compare_dialog(self):
         if not self.current_project:
@@ -2324,14 +2285,19 @@ class RaizQAGUI(QMainWindow):
         dialog = WordCloudDialog(self.current_project, docs, parent=self)
         dialog.exec()
 
+    #CHECK: Tambien entender esto
     def open_themes_analysis(self):
         if not self.current_project:
             QMessageBox.information(self, "Analisis de temas", "Primero abre o crea un proyecto.")
             return
-        if not self.code_themes:
+        if not self.themes_dict:
             QMessageBox.information(self, "Analisis de temas", "No hay temas o categorias creadas.")
             return
-        dialog = ThemesAnalysisDialog(self.codes_dict, self.code_themes, self.current_project, parent=self)
+        themes_list = [
+            {"name": name, "memo": data.get("memo", ""), "codes": data.get("codes", [])}
+            for name, data in self.themes_dict.items()
+        ]
+        dialog = ThemesAnalysisDialog(self.codes_dict, themes_list, self.current_project, parent=self)
         dialog.exec()
 
     def open_case_study(self):
@@ -2343,20 +2309,21 @@ class RaizQAGUI(QMainWindow):
             QMessageBox.information(self, "Estudio de casos", "No hay documentos para analizar.")
             return
         if not self.codes_dict:
-            QMessageBox.information(self, "Estudio de casos", "No hay cÃ³digos creados aÃºn.")
+            QMessageBox.information(self, "Estudio de casos", "No hay códigos creados aún.")
             return
+        case_studies = self.current_project.get_case_studies()
+
         dialog = CaseStudyDialog(
             self.current_project,
             self.codes_dict,
             docs,
-            self.case_studies,
+            case_studies,
             self.doc_groups,
             parent=self,
         )
         dialog.exec()
         if dialog.updated:
-            self.case_studies = dialog.get_case_studies()
-            self.save_project()
+            self.signal_req_save_case_studies.emit(dialog.get_case_studies())
 
     # -------------------- EXPORTAR SISTEMA DE CÓDIGOS --------------------
     def export_code_tree(self):
@@ -2543,14 +2510,6 @@ class RaizQAGUI(QMainWindow):
             self.highlight_fragment(frag)
 
 
-
-
-
-    def save_current_highlights(self):
-        """Metodo obsoleto. Las EDDs se encargan de persistir los fragmentos nativamente."""
-        pass
-
-
     # -------------------------
     # Actualizar ícono de memo
     # -------------------------
@@ -2636,35 +2595,16 @@ class RaizQAGUI(QMainWindow):
         for idx in range(self.code_tree.topLevelItemCount()):
             walk(self.code_tree.topLevelItem(idx))
 
-    def mark_as_dirty(self, *args, **kwargs):
-        """Marca el proyecto como modificado (con cambios sin guardar)."""
-        self.has_unsaved_changes = True
-        if self.current_project and not self.windowTitle().endswith("*"):
-            self.setWindowTitle(f"RaizQA 🌱 - {self.current_project.name} *")
-
     def closeEvent(self, event):
-        """Intercepta el evento de cierre si hay cambios sin guardar."""
-        if self.has_unsaved_changes:
-            msg_box = QMessageBox(self)
-            msg_box.setWindowTitle("Cambios sin guardar")
-            msg_box.setText("Hay cambios sin guardar en el proyecto actual.")
-            msg_box.setInformativeText("¿Deseas guardar los cambios antes de salir?")
+        """El estado del proyecto ya se persiste de forma síncrona en cada operación de dominio.
+        Solo forzamos el flush de una edición de documento que aún esté esperando el debounce."""
+        if self.current_project:
+            self.signal_req_save_project.emit()
             
-            btn_save = msg_box.addButton("Guardar y salir", QMessageBox.AcceptRole)
-            btn_discard = msg_box.addButton("Salir sin guardar", QMessageBox.DestructiveRole)
-            btn_cancel = msg_box.addButton("Cancelar", QMessageBox.RejectRole)
-            
-            msg_box.exec()
-            
-            if msg_box.clickedButton() == btn_save:
-                self.save_project()
-                event.accept()
-            elif msg_box.clickedButton() == btn_discard:
-                event.accept()
-            else:
-                event.ignore()
-        else:
-            event.accept()
+        if self._pending_doc_save:
+            self._doc_save_timer.stop()
+            self._save_document_edit()
+        event.accept()
 
 class ExportCodeSelectionDialog(QDialog):
     def __init__(self, code_rows, parent=None):
@@ -2712,10 +2652,10 @@ class ExportCodeSelectionDialog(QDialog):
             if item.checkState() == Qt.Checked:
                 selected.append(item.data(Qt.UserRole))
         return selected
-
+    
 
 class ColorPickerDialog(QDialog):
-    """Muestra 10 colores fijos inspirados en MaxQDA para seleccionar un código."""
+    """Muestra 10 colores fijos para seleccionar un código."""
 
     def __init__(self, palette, current_color=None, parent=None):
         super().__init__(parent)
@@ -2749,5 +2689,4 @@ class ColorPickerDialog(QDialog):
         layout.addWidget(btn_box)
 
     def _select_and_accept(self, color_hex):
-        self.selected_color = color_hex
-        self.accept()
+        self.selected_co
