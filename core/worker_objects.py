@@ -1,5 +1,9 @@
 from PySide6.QtCore import QObject, Signal, QRunnable, Slot
 from core.search_manager import SearchManager
+from core.export_manager import ExportManager
+from core.import_manager import ImportManager
+from core.merge_manager import MergeManager
+import traceback
 
 class BuscadorWorkerSignals(QObject):
     """
@@ -44,7 +48,7 @@ class BuscadorWorker(QRunnable):
                 self.signals.error.emit("Sin coincidencias en documentos, códigos o memos.")
                  
         except Exception as e:
-            self.signals.error.emit(f"Error en búsqueda: {str(e)}")
+            self.signals.error.emit(f"Error en búsqueda: {e}")
 
 
 class ImportExportWorkerSignals(QObject):
@@ -61,11 +65,10 @@ class ExportWorker(QRunnable):
     @Slot()
     def run(self):
         try:
-            from core.export_manager import ExportManager
             result_path = ExportManager.export_project_to_rqa(self.project_path, self.export_path)
             self.signals.finished.emit(result_path)
         except Exception as e:
-            self.signals.error.emit(f"Error al exportar el proyecto: {str(e)}")
+            self.signals.error.emit(f"Error al exportar el proyecto: {e}")
 
 class ImportWorker(QRunnable):
     def __init__(self, rqa_path, dest_base_path):
@@ -77,11 +80,10 @@ class ImportWorker(QRunnable):
     @Slot()
     def run(self):
         try:
-            from core.import_manager import ImportManager
             result_path = ImportManager.import_project_from_rqa(self.rqa_path, self.dest_base_path)
             self.signals.finished.emit(result_path)
         except Exception as e:
-            self.signals.error.emit(f"Error en importación de proyecto: {str(e)}")
+            self.signals.error.emit(f"Error en importación de proyecto: {e}")
 
 class ExportExchangeWorker(QRunnable):
     """
@@ -100,13 +102,12 @@ class ExportExchangeWorker(QRunnable):
     @Slot()
     def run(self):
         try:
-            from core.export_manager import ExportManager
             path = ExportManager.export_exchange_to_rex(
                 self.project, self.docs, self.codes, self.options, self.export_path
             )
             self.signals.finished.emit(path)
         except Exception as e:
-            self.signals.error.emit(f"Error al exportar archivo de intercambio: {str(e)}")
+            self.signals.error.emit(f"Error al exportar archivo de intercambio: {e}")
 
 class ImportExchangeWorker(QRunnable):
     """
@@ -123,7 +124,6 @@ class ImportExchangeWorker(QRunnable):
     @Slot()
     def run(self):
         try:
-            from core.import_manager import ImportManager
             ImportManager.import_exchange_from_rex(
                 self.rex_path, self.target_project, self.import_data
             )
@@ -131,7 +131,7 @@ class ImportExchangeWorker(QRunnable):
         except Exception as e:
             import traceback
             traceback.print_exc()
-            self.signals.error.emit(f"Error al importar archivo de intercambio: {str(e)}")
+            self.signals.error.emit(f"Error al importar archivo de intercambio: {e}")
 
 class MergeWorkerSignals(QObject):
     finished = Signal()
@@ -152,10 +152,10 @@ class MergeWorker(QRunnable):
     @Slot()
     def run(self):
         try:
-            from core.merge_manager import MergeManager
-            MergeManager.merge_projects(self.target_project, self.rqa_path, self.settings)
-            self.signals.finished.emit()
+            # El lock protege save_state() de una carrera con el hilo principal
+            with self.target_project._state_lock:
+                summary = MergeManager.merge_projects(self.target_project, self.rqa_path, self.settings)
+            self.signals.finished.emit(summary)
         except Exception as e:
-            import traceback
             traceback.print_exc()
-            self.signals.error.emit(f"Error al combinar proyectos: {str(e)}")
+            self.signals.error.emit(f"Error al combinar proyectos: {str(e)}")
