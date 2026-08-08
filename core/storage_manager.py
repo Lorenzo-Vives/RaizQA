@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 # ----------------------------------------------------------------------
 class StorageManager:
     """
-    Administra la persistencia atómica de datos con respaldo (.bak).
+    Administra la persistencia de datos con respaldo (.bak).
     """
 
     def __init__(self, state_filename: str = "project_data.json"):
@@ -23,14 +23,15 @@ class StorageManager:
     def save(self, project_path: str, state: dict):
         state_path = os.path.join(project_path, self.state_filename)
         bak_path = state_path + ".bak"
-        
         tmp_path = os.path.join(
             project_path, f"{self.state_filename}.{os.getpid()}.{time.time_ns()}.tmp"
         )
 
         try:
+            data = json.dumps(state, indent=4, ensure_ascii=False)
+
             with open(tmp_path, "w", encoding="utf-8") as f:
-                json.dump(state, f, indent=4, ensure_ascii=False)
+                f.write(data)
 
             if os.path.exists(state_path):
                 shutil.copy2(state_path, bak_path)
@@ -38,21 +39,23 @@ class StorageManager:
             os.replace(tmp_path, state_path)
             return True
 
-        except OSError as e:
+        except (OSError, TypeError, ValueError) as e:
             logger.error(f"Error al guardar el estado del proyecto en {state_path}: {e}")
-            if os.path.exists(tmp_path):
-                try:
-                    os.remove(tmp_path)
-                except OSError:
-                    pass
             return False
-
+        
+        finally:
+            try:
+                os.remove(tmp_path)
+            except FileNotFoundError:
+                pass
+            except OSError as e:
+                logger.warning(f"No se pudo eliminar el archivo temporal {tmp_path}: {e}")
             
             
     def load(self, project_path: str) -> dict:
         """
-        Carga el estado persistido. Si el archivo principal no existe
-        o está corrupto, intenta recuperarlo desde el respaldo (.bak).
+        Si el archivo principal no existe o está corrupto, 
+        intenta recuperarlo desde el respaldo (.bak).
         Si ambos fallan, retorna un estado vacío.
         """
         state_path = os.path.join(project_path, self.state_filename)
@@ -60,6 +63,7 @@ class StorageManager:
 
         for path in (state_path, bak_path):
             if not os.path.exists(path):
+                logger.warning(f"Ruta {path} no existe")
                 continue
             try:
                 with open(path, "r", encoding="utf-8") as f:
