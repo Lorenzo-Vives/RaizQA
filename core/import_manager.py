@@ -3,6 +3,8 @@ import shutil
 import zipfile
 import tempfile
 import json
+from diff_match_patch import diff_match_patch
+
 
 class ImportManager:
     """Gestor dedicado para desempaquetar proyectos en formato .rqa"""
@@ -114,7 +116,6 @@ class ImportManager:
             target_project (Project): El proyecto actual de RaizQA en el cual se inyectarán los datos.
             import_data (dict): Diccionario con las opciones de importación (códigos, documentos, memos, etc.)
         """
-        from diff_match_patch import diff_match_patch
         dmp = diff_match_patch()
         
         # Guardamos el estado base legacy para resguardarlo

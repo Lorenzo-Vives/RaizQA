@@ -1,557 +1,359 @@
 import os
 import json
-import shutil
-import platform
-import subprocess
-from docx import Document as DocxDocument
-from PyPDF2 import PdfReader
+import threading
+import logging
+import functools
+from typing import Dict, List, Optional, Tuple
 from diff_match_patch import diff_match_patch
 
-from core.memos import MemoManager
-from core.diary_manager import DiaryManager
+from core import (CodeManager, DiaryManager, DocumentManager,
+                GroupManager, MemoManager, StorageManager,
+                ThemeManager)
+logger = logging.getLogger(__name__)
 
+# ----------------------------------------------------------------------
+# Gestor de Anotaciones
+# ----------------------------------------------------------------------
+class AnnotationManager:
+    def __init__(self):
+        self.highlights: dict = {}
+
+    def load_highlights(self, highlights: dict):
+        self.highlights = highlights
+
+    def get_highlights(self) -> dict:
+        return self.highlights
+
+
+class CaseStudyManager:
+    def __init__(self):
+        self.case_studies: List[dict] = []
+
+    def load(self, case_studies: List[dict]):
+        self.case_studies = case_studies or []
+
+    def get_all(self) -> List[dict]:
+        return list(self.case_studies)
+
+
+
+
+
+def autosave(method):
+    
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+
+        resultado = method(self, *args, **kwargs)
+        
+        self.save_state()
+        
+
+        return resultado
+    return wrapper
 
 class Project:
-    """Administra la estructura y persistencia de un proyecto de análisis cualitativo."""
-
-    TEXT_EXTENSIONS = {".txt", ".docx", ".pdf"}
-    IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tiff"}
-
-    def __init__(self, name, base_path):
+    def __init__(
+        self,
+        name: str,
+        base_path: str,
+        doc_manager: Optional[DocumentManager] = None,
+        code_manager: Optional[CodeManager] = None,
+        theme_manager: Optional[ThemeManager] = None,
+        group_manager: Optional[GroupManager] = None,
+        annotation_manager: Optional[AnnotationManager] = None,
+        case_study_manager: Optional[CaseStudyManager] = None,
+        storage: Optional[StorageManager] = None,
+        memo_manager: Optional[MemoManager] = None,
+        diary_manager: Optional[DiaryManager] = None,
+    ):
         self.name = name
         self.base_path = base_path
         self.path = os.path.join(base_path, name)
-        self.documents_path = os.path.join(self.path, "documentos")
-        self.codes_path = os.path.join(self.path, "codigos")
-        self.metadata_path = os.path.join(self.path, "metadata.json")
-        self.state_path = os.path.join(self.path, "project_data.json")
-        self.project_path = self.path  # alias por compatibilidad
-        self.diary_manager = DiaryManager(self.path)
-        self.memos_dict = {}
-        self.memo_manager = MemoManager(self.memos_dict)
-        
-        # Nuevas Estructuras de Datos (EDDs)
-        self.codes_dict = {}
-        self.themes_dict = {}
-        self.texts_dict = {}
-        
+
+        # Dependencias inyectables (con valores por defecto)
+        self.doc_manager = doc_manager or DocumentManager(
+            documents_path=os.path.join(self.path, "documentos"),
+            metadata_path=os.path.join(self.path, "metadata.json"),
+            project_name=name,
+        )
+        self.code_manager = code_manager or CodeManager()
+        self.theme_manager = theme_manager or ThemeManager()
+        self.group_manager = group_manager or GroupManager()
+        self.annotation_manager = annotation_manager or AnnotationManager()
+        self.case_study_manager = case_study_manager or CaseStudyManager()
+        self.storage = storage or StorageManager()
+        self.memo_manager = memo_manager or MemoManager({})
+        self.diary_manager = diary_manager or DiaryManager(self.path)
+
         self._ensure_structure()
+        # Protege save_state
+        self._state_lock = threading.RLock()
+        self._load_state()
+        
 
-    # ------------------------------------------------------------------
-    # ESTRUCTURA Y PERSISTENCIA
-    # ------------------------------------------------------------------
     def _ensure_structure(self):
-        """Crea carpetas y archivos base si no existen."""
-        os.makedirs(self.documents_path, exist_ok=True)
-        os.makedirs(self.codes_path, exist_ok=True)
-        if not os.path.exists(self.metadata_path):
-            meta = {"name": self.name, "documents": []}
-            with open(self.metadata_path, "w", encoding="utf-8") as f:
-                json.dump(meta, f, indent=4, ensure_ascii=False)
+        os.makedirs(self.path, exist_ok=True)
 
-    def save_project_data(self, documents, highlights, doc_groups=None, themes=None, case_studies=None):
-        """Persiste todo el estado (EDDs y metadatos) en un único archivo atómico."""
-        data = {
-            "documents": documents,
-            "highlights": highlights,
-            "codes_dict": self.codes_dict,
-            "themes_dict": self.themes_dict,
-            "memos_dict": self.memos_dict,
-        }
-        if doc_groups is not None:
-            data["doc_groups"] = doc_groups
-            self.sync_doc_groups_to_fs(doc_groups)
-        if themes is not None:
-            data["themes"] = themes
-        if case_studies is not None:
-            data["case_studies"] = case_studies
-            
-        tmp_path = self.state_path + ".tmp"
-        bak_path = self.state_path + ".bak"
-        
-        try:
-            with open(tmp_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=4, ensure_ascii=False)
-                
-            import time
-            success = False
-            for _ in range(3):
-                try:
-                    if os.path.exists(self.state_path):
-                        os.replace(self.state_path, bak_path)
-                    os.replace(tmp_path, self.state_path)
-                    success = True
-                    break
-                except Exception:
-                    time.sleep(0.2)
-            if not success:
-                print(f"Advertencia: No se pudo actualizar atómicamente {self.state_path}")
-        except Exception as e:
-            print(f"Error fatal al guardar proyecto: {e}")
+    def _load_state(self):
 
-    def load_project_data(self):
-        """Carga el estado único guardado. Si no existe, intenta con el backup."""
-        default_state = {"documents": [], "highlights": {}, "codes_dict": {}, "themes_dict": {}}
-        
-        data = default_state
-        if os.path.exists(self.state_path):
-            try:
-                with open(self.state_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-            except Exception:
-                # Si el original está corrupto, usar el backup
-                bak_path = self.state_path + ".bak"
-                if os.path.exists(bak_path):
-                    with open(bak_path, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                        
-        self.codes_dict = data.get("codes_dict", {})
-        self.themes_dict = data.get("themes_dict", {})
-        self.memos_dict = data.get("memos_dict", {})
-        
-        # Migración: Asegurar que los códigos tengan la estructura de árbol (parent/children)
-        for code, code_data in self.codes_dict.items():
-            if "parent" not in code_data:
-                code_data["parent"] = None
-            if "children" not in code_data:
-                code_data["children"] = []
-        
-        
-        # Migración: Si memos_dict está vacío, intentar cargar del archivo antiguo memos.json
-        if not self.memos_dict:
+        data = self.storage.load(self.path)
+
+        self.annotation_manager.load_highlights(data.get("highlights", {}))
+        self.code_manager.load_codes(data.get("codes_dict", {}))
+        self.theme_manager.load_themes(data.get("themes_dict", {}))
+        self.case_study_manager.load(data.get("case_studies", []))
+
+        # Migración de memos antiguos
+        memos = data.get("memos_dict", {})
+        if not memos:
             old_memos_path = os.path.join(self.path, "memos.json")
             if os.path.exists(old_memos_path):
                 try:
                     with open(old_memos_path, "r", encoding="utf-8") as f:
-                        self.memos_dict = json.load(f)
+                        memos = json.load(f)
                 except Exception:
                     pass
-                    
-        self.memo_manager.memos = self.memos_dict
-        
-        fs_doc_groups = self.scan_doc_groups_from_fs()
-        if fs_doc_groups and (len(fs_doc_groups.get("__root__", [])) > 0 or len(fs_doc_groups) > 1):
-            data["doc_groups"] = fs_doc_groups
-            
-        return data
+        self.memo_manager.memos = memos
 
-    def sync_doc_groups_to_fs(self, doc_groups):
-        """Refleja la estructura de doc_groups en el sistema de archivos real usando .raizptr."""
-        if not doc_groups or not os.path.exists(self.documents_path):
-            return
-            
-        # 1. Eliminar SOLAMENTE los .raizptr existentes (para ser seguros y no borrar archivos del usuario)
-        for item in os.listdir(self.documents_path):
-            item_path = os.path.join(self.documents_path, item)
-            if os.path.isdir(item_path):
-                # Eliminar solo .raizptr dentro del directorio
-                for sub_item in os.listdir(item_path):
-                    if sub_item.endswith(".raizptr"):
-                        os.remove(os.path.join(item_path, sub_item))
-                
-                # Si el directorio quedó vacío y no está en doc_groups, lo borramos
-                if not os.listdir(item_path) and item not in doc_groups:
-                    try:
-                        os.rmdir(item_path)
-                    except OSError:
-                        pass
-                
-        # 2. Recrear las subcarpetas según doc_groups y añadir los .raizptr
-        for group_name, docs in doc_groups.items():
-            if group_name == "__root__":
-                continue
-                
-            group_dir = os.path.join(self.documents_path, group_name)
-            os.makedirs(group_dir, exist_ok=True)
-            
-            # Ocultar la carpeta en Windows y macOS
-            if platform.system() == "Windows":
-                try:
-                    import ctypes
-                    FILE_ATTRIBUTE_HIDDEN = 0x02
-                    ctypes.windll.kernel32.SetFileAttributesW(group_dir, FILE_ATTRIBUTE_HIDDEN)
-                except Exception:
-                    pass
-            elif platform.system() == "Darwin":
-                try:
-                    subprocess.run(["chflags", "hidden", group_dir], check=False)
-                except Exception:
-                    pass
-            
-            for doc in docs:
-                ptr_path = os.path.join(group_dir, f"{doc}.raizptr")
-                with open(ptr_path, "w", encoding="utf-8") as f:
-                    f.write(f"target=../{doc}")
-
-    def scan_doc_groups_from_fs(self):
-        """Reconstruye doc_groups escaneando la carpeta documentos/."""
-        doc_groups = {"__root__": []}
-        if not os.path.exists(self.documents_path):
-            return doc_groups
-            
-        for item in os.listdir(self.documents_path):
-            item_path = os.path.join(self.documents_path, item)
-            
-            # Documentos en la raíz
-            if os.path.isfile(item_path):
-                ext = os.path.splitext(item)[1].lower()
-                if ext in self.TEXT_EXTENSIONS or ext in self.IMAGE_EXTENSIONS:
-                    doc_groups["__root__"].append(item)
-                    
-            # Subcarpetas
-            elif os.path.isdir(item_path):
-                group_name = item
-                doc_groups[group_name] = []
-                for sub_item in os.listdir(item_path):
-                    if sub_item.endswith(".raizptr"):
-                        doc_name = sub_item[:-8] # quitar .raizptr
-                        doc_groups[group_name].append(doc_name)
-                        
-        # Un documento no debe aparecer en __root__ si ya está en una carpeta
-        docs_in_groups = set()
-        for group, docs in doc_groups.items():
-            if group != "__root__":
-                docs_in_groups.update(docs)
-                
-        doc_groups["__root__"] = [doc for doc in doc_groups["__root__"] if doc not in docs_in_groups]
-        
-        return doc_groups
-    # ------------------------------------------------------------------
-    # DIARIO DE CODIFICACIÓN
-    # ------------------------------------------------------------------
-    def get_diary_path(self):
-        return os.path.join(self.path, "diario.json")
-    # ------------------------------------------------------------------
-    # DOCUMENTOS
-    # ------------------------------------------------------------------
-    def import_document(self, file_path):
-        """Importa un archivo de texto o imagen y devuelve (nombre, texto)."""
-        ext = os.path.splitext(file_path)[1].lower()
-        filename = os.path.splitext(os.path.basename(file_path))[0]
-        dest_name = f"{filename}{ext if ext in self.IMAGE_EXTENSIONS else '.txt'}"
-        dest_path = os.path.join(self.documents_path, dest_name)
-
-        if ext in self.IMAGE_EXTENSIONS:
-            shutil.copy2(file_path, dest_path)
-            text = ""
-        elif ext == ".docx":
-            text = self._read_docx(file_path)
-        elif ext == ".pdf":
-            text = self._read_pdf(file_path)
-        elif ext == ".txt":
-            text = self._read_txt(file_path)
+        doc_groups = data.get("doc_groups")
+        if doc_groups:
+            self.group_manager.groups = doc_groups
         else:
-            raise ValueError("Solo se admiten archivos .txt, .docx, .pdf o imágenes (png, jpg, jpeg, bmp, gif, tiff)")
+            fs_groups = self.group_manager.scan_from_filesystem(
+                self.doc_manager.documents_path
+            )
+            if fs_groups and (
+                len(fs_groups.get("__root__", [])) > 0 or len(fs_groups) > 1
+            ):
+                self.group_manager.groups = fs_groups
 
-        if ext in self.TEXT_EXTENSIONS:
-            self._write_text(dest_path, text)
-        self._register_document(dest_name)
-        return dest_name, text
+        # Asegurar estructura de árbol en códigos cargados
+        for code in self.code_manager.codes_dict.values():
+            if (
+                code.parent is not None
+                and code.parent not in self.code_manager.codes_dict
+            ):
+                code.parent = None
 
-    def _register_document(self, document_name):
-        """Añade el documento al metadata.json para compatibilidad."""
-        if os.path.exists(self.metadata_path):
-            with open(self.metadata_path, "r", encoding="utf-8") as f:
-                meta = json.load(f)
-        else:
-            meta = {"name": self.name, "documents": []}
-
-        if document_name not in meta["documents"]:
-            meta["documents"].append(document_name)
-            with open(self.metadata_path, "w", encoding="utf-8") as f:
-                json.dump(meta, f, indent=4, ensure_ascii=False)
-
-    def delete_document(self, document_name):
-        """Elimina el archivo y lo quita del metadata."""
-        doc_path = self.get_document_path(document_name)
-        if os.path.exists(doc_path):
-            try:
-                os.remove(doc_path)
-            except OSError:
-                pass
-        if os.path.exists(self.metadata_path):
-            try:
-                with open(self.metadata_path, "r", encoding="utf-8") as f:
-                    meta = json.load(f)
-                if document_name in meta.get("documents", []):
-                    meta["documents"].remove(document_name)
-                    with open(self.metadata_path, "w", encoding="utf-8") as f:
-                        json.dump(meta, f, indent=4, ensure_ascii=False)
-            except Exception:
-                pass
-
-    def list_documents(self):
-        """Devuelve los documentos almacenados en la carpeta del proyecto."""
-        if not os.path.exists(self.documents_path):
-            return []
-        allowed = tuple(self.TEXT_EXTENSIONS | self.IMAGE_EXTENSIONS)
-        return sorted(f for f in os.listdir(self.documents_path) if f.lower().endswith(allowed))
-
-    def get_document_path(self, document_name):
-        return os.path.join(self.documents_path, document_name)
-
-    def read_document(self, document_name):
-        """Lee el texto plano almacenado para un documento. Las imágenes devuelven cadena vacía."""
-        doc_path = self.get_document_path(document_name)
-        if not os.path.exists(doc_path):
-            return ""
-        ext = os.path.splitext(document_name)[1].lower()
-        if ext in self.IMAGE_EXTENSIONS:
-            return ""
-        with open(doc_path, "r", encoding="utf-8") as f:
-            return f.read()
-
-    def _write_text(self, path, text):
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(text)
-
-    # ------------------------------------------------------------------
-    # LECTORES DE FORMATOS
-    # ------------------------------------------------------------------
-    def _read_txt(self, file_path):
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                return f.read()
-        except UnicodeDecodeError:
-            with open(file_path, "r", encoding="latin-1") as f:
-                return f.read()
-
-    def _read_docx(self, file_path):
-        doc = DocxDocument(file_path)
-        paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
-        return "\n".join(paragraphs)
-
-    def _read_pdf(self, file_path):
-        reader = PdfReader(file_path)
-        text = []
-        for page in reader.pages:
-            content = page.extract_text()
-            if content:
-                text.append(content)
-        return "\n".join(text)
-
-    # ------------------------------------------------------------------
-    # EXPORTES POR DOCUMENTO (RESERVADO)
-    # ------------------------------------------------------------------
-    def save_document_codes(self, document):
-        """Guarda los códigos de un documento en un archivo JSON independiente."""
-        os.makedirs(self.codes_path, exist_ok=True)
-        codes_file = os.path.join(self.codes_path, f"{document.title}_codes.json")
-        with open(codes_file, "w", encoding="utf-8") as f:
-            json.dump(document.codes, f, indent=4, ensure_ascii=False)
-
-    def load_document_codes(self, document_title):
-        """Carga códigos previamente exportados para un documento."""
-        codes_file = os.path.join(self.codes_path, f"{document_title}_codes.json")
-        if not os.path.exists(codes_file):
-            return []
-        with open(codes_file, "r", encoding="utf-8") as f:
-            return json.load(f)
-
-    # ==================================================================
-    # NUEVAS ESTRUCTURAS DE DATOS (EDDs) EN MEMORIA
-    # ==================================================================
-    
-    # --- TEXTOS EN MEMORIA ---
-    def load_all_texts_to_memory(self):
-        """Carga el texto de todos los documentos en self.texts_dict para lectura O(1)."""
-        for doc_name in self.list_documents():
-            self.get_document_text(doc_name)
-
-    def get_document_text(self, doc_name):
-        """Devuelve el texto del documento. Si no está en memoria, lo carga perezosamente."""
-        if doc_name not in self.texts_dict:
-            self.texts_dict[doc_name] = self.read_document(doc_name)
-        return self.texts_dict[doc_name]
-
-    # --- CRUD CÓDIGOS ---
-    def add_code(self, code_name, hexcolor="#5d9bd3", memo="", parent_name=None):
-        if code_name not in self.codes_dict:
-            # Validar que el padre exista
-            if parent_name and parent_name not in self.codes_dict:
-                parent_name = None
-
-            self.codes_dict[code_name] = {
-                "hexcolor": hexcolor,
-                "memo": memo,
-                "fragments": {}, # doc_name: [{"start": 0, "end": 10}, ...]
-                "parent": parent_name,
-                "children": []
+    def save_state(self):
+        with self._state_lock:
+            state = {
+                "documents": self.doc_manager.documents,
+                "highlights": self.annotation_manager.get_highlights(),
+                "codes_dict": self.code_manager.get_all_codes(),
+                "themes_dict": self.theme_manager.get_all_themes(),
+                "case_studies": self.case_study_manager.get_all(),
+                "memos_dict": self.memo_manager.memos,
+                "doc_groups": self.group_manager.groups,
             }
-            if parent_name:
-                self.codes_dict[parent_name]["children"].append(code_name)
+            ok = self.storage.save(self.path, state)
+            if not ok:
+                raise IOError(
+                    f"No se pudo guardar el estado del proyecto '{self.name}' en disco."
+                )
+            documents_path = self.doc_manager.documents_path
+            self.group_manager.clean_existing_pointers(documents_path)
+            self.group_manager.create_groups_and_pointers(documents_path)
 
-    def delete_code(self, code_name, cascade=False):
-        if code_name in self.codes_dict:
-            code_data = self.codes_dict[code_name]
-            
-            # Gestionar hijos (subcódigos)
-            children = list(code_data.get("children", []))
-            for child in children:
-                if cascade:
-                    self.delete_code(child, cascade=True)
-                else:
-                    # Promover a la raíz
-                    if child in self.codes_dict:
-                        self.codes_dict[child]["parent"] = None
-            
-            # Sacar de la lista de hijos del padre
-            parent = code_data.get("parent")
-            if parent and parent in self.codes_dict:
-                if code_name in self.codes_dict[parent]["children"]:
-                    self.codes_dict[parent]["children"].remove(code_name)
+    @autosave
+    def import_document(self, file_path: str) -> Tuple[str, str]:
+        doc_name, text = self.doc_manager.import_document(file_path)
+        return doc_name, text
 
-            del self.codes_dict[code_name]
-            # También lo sacamos de cualquier tema al que pertenezca
-            for theme in self.themes_dict.values():
-                if code_name in theme.get("codes", []):
-                    theme["codes"].remove(code_name)
+    @autosave
+    def delete_document(self, doc_name: str):
+        self.doc_manager.delete_document(doc_name)
+        self.code_manager.remove_fragments_for_document(doc_name)
+        self.group_manager.remove_document_from_all_groups(doc_name)
 
-    def update_code(self, old_name, new_name=None, hexcolor=None, memo=None):
-        if old_name not in self.codes_dict:
-            return
-            
-        # Si se renombra el código, extraemos sus datos y cambiamos la llave
-        if new_name and new_name != old_name:
-            self.codes_dict[new_name] = self.codes_dict.pop(old_name)
-            target_name = new_name
-            # Actualizar en los temas
-            for theme in self.themes_dict.values():
-                if old_name in theme.get("codes", []):
-                    theme["codes"].remove(old_name)
-                    theme["codes"].append(new_name)
-                    
-            # Actualizar en los hijos
-            for child in self.codes_dict[new_name].get("children", []):
-                if child in self.codes_dict:
-                    self.codes_dict[child]["parent"] = new_name
-                    
-            # Actualizar en el padre
-            parent = self.codes_dict[new_name].get("parent")
-            if parent and parent in self.codes_dict:
-                parent_children = self.codes_dict[parent]["children"]
-                for i in range(len(parent_children)):
-                    if parent_children[i] == old_name:
-                        parent_children[i] = new_name
-        else:
-            target_name = old_name
-            
-        if hexcolor is not None:
-            self.codes_dict[target_name]["hexcolor"] = hexcolor
-        if memo is not None:
-            self.codes_dict[target_name]["memo"] = memo
-
-    def add_fragment(self, code_name, doc_name, fragment_data):
-        """Añade los datos de un fragmento (texto o imagen) a un código específico."""
-        self.add_code(code_name) # Asegurar que el código exista
-        fragments_doc = self.codes_dict[code_name]["fragments"].setdefault(doc_name, [])
-        fragments_doc.append(fragment_data)
-
-    def get_fragments_for_code(self, code_name):
-        """
-        Recupera el texto real de forma instantánea (O(1)) para todos los fragmentos
-        asociados a un código utilizando el texto pre-cargado.
-        """
-        if code_name not in self.codes_dict:
-            return []
-            
-        results = []
-        for doc_name, fragments in self.codes_dict[code_name]["fragments"].items():
-            full_text = self.get_document_text(doc_name)
-            for frag in fragments:
-                start, end = frag["start"], frag["end"]
-                text_snippet = full_text[start:end]
-                results.append({
-                    "doc": doc_name,
-                    "start": start,
-                    "end": end,
-                    "text": text_snippet
-                })
-        return results
-
-    # --- CRUD TEMAS ---
-    def add_theme(self, theme_name, memo=""):
-        if theme_name not in self.themes_dict:
-            self.themes_dict[theme_name] = {
-                "memo": memo,
-                "codes": []
-            }
-
-    def delete_theme(self, theme_name):
-        if theme_name in self.themes_dict:
-            del self.themes_dict[theme_name]
-
-    def add_code_to_theme(self, theme_name, code_name):
-        self.add_theme(theme_name)
-        if code_name not in self.themes_dict[theme_name]["codes"]:
-            self.themes_dict[theme_name]["codes"].append(code_name)
-            
-    def remove_code_from_theme(self, theme_name, code_name):
-        if theme_name in self.themes_dict:
-            if code_name in self.themes_dict[theme_name]["codes"]:
-                self.themes_dict[theme_name]["codes"].remove(code_name)
-
-    # --- PERSISTENCIA ELIMINADA: TODO SE MANEJA EN SAVE_PROJECT_DATA ---
-    def update_document_text(self, doc_name, new_text):
-        """
-        Actualiza el texto en disco y resincroniza dinámicamente 
-        los índices de los códigos asociados usando Diff-Match-Patch.
-        """
-        # 1. Leer el texto original ANTES de sobrescribirlo
-        old_text = self.read_document(doc_name)
+    @autosave
+    def update_document_text(self, doc_name: str, new_text: str):
+        old_text = self.doc_manager.get_document_text(doc_name)
+        self.doc_manager.write_text(doc_name, new_text)
+        self.doc_manager.text_cache[doc_name] = new_text
+        self.code_manager.sync_fragments_for_document(doc_name, old_text, new_text)
         
-        # 2. Sincronizar la Estructura de Datos (EDD)
-        self._sync_fragment_indices(doc_name, old_text, new_text)
-        
-        # 3. Sobrescribir el archivo en disco
-        doc_path = self.get_document_path(doc_name)
-        with open(doc_path, 'w', encoding='utf-8') as f:
-            f.write(new_text)
+    @autosave
+    def remove_document_from_all_groups(self, doc_name: str):
+        self.group_manager.remove_document_from_all_groups(doc_name)
 
-    def _sync_fragment_indices(self, doc_name, old_text, new_text):
-        """
-        Busca dónde aterrizaron los fragmentos antiguos dentro del texto nuevo.
-        """
+    @autosave
+    def delete_code(self, code_name: str, cascade: bool = False):
+        deleted = self.code_manager.delete_code(code_name, cascade)
+        for name in deleted:
+            self.theme_manager.remove_code_from_all_themes(name)
+            self.memo_manager.delete_memo(name)
+
+    def get_fragments_for_code(self, code_name: str) -> List[dict]:
+        return self.code_manager.get_fragments_for_code(
+            code_name, self.doc_manager.get_document_text
+        )
+
+    def get_fragments_for_document(self, doc_name: str) -> List[dict]:
+        return self.code_manager.get_fragments_for_document(doc_name)
+
+    def get_hydrated_codes(self) -> Dict[str, dict]:
+        """Copia de codes_dict con el texto real de cada fragmento inyectado."""
+        hydrated = self.code_manager.get_all_codes()
+        for code_name, data in hydrated.items():
+            for doc_name, frags in data.get("fragments", {}).items():
+                doc_text = self.get_document_text(doc_name)
+                for frag in frags:
+                    if frag.get("type") == "image":
+                        continue
+                    if "text" not in frag:
+                        start, end = frag.get("start", 0), frag.get("end", 0)
+                        frag["text"] = doc_text[start:end]
+        return hydrated
+
+    def locate_fragment_by_text(self, doc_name: str, snippet: str, hint_start: int = 0):
+        """Relocaliza un fragmento de texto por coincidencia aproximada (diff_match_patch)
+        cuando no existen offsets persistidos confiables."""
+        if not snippet:
+            return None, None
+        doc_text = self.doc_manager.get_document_text(doc_name)
         dmp = diff_match_patch()
-        
-        # Tolerancia del algoritmo (0.0 es exacto, 0.5 es muy flexible)
-        # 0.3 es un buen balance: permite pequeñas correcciones ortográficas 
-        # sin perder el fragmento, pero falla si cambian la frase entera.
-        dmp.Match_Threshold = 0.3 
-        
-        for code_name, data in self.codes_dict.items():
-            fragments = data.get("fragments", {}).get(doc_name, [])
-            valid_fragments = []
-            
-            for frag in fragments:
-                # Ignorar imágenes u otros tipos de datos
-                if frag.get("type") != "text":
-                    valid_fragments.append(frag)
-                    continue
-                    
-                start = frag.get("start")
-                end = frag.get("end")
-                
-                if start is None or end is None:
-                    valid_fragments.append(frag)
-                    continue
-                    
-                # Extraemos cómo se veía el fragmento antes de la edición
-                frag_text = old_text[start:end]
-                
-                # Buscamos la nueva ubicación aproximada partiendo de la ubicación vieja
-                new_start = dmp.match_main(new_text, frag_text, start)
-                
-                if new_start != -1:
-                    # El algoritmo encontró el fragmento. Actualizamos índices.
-                    frag["start"] = new_start
-                    frag["end"] = new_start + len(frag_text)
-                    valid_fragments.append(frag)
-                else:
-                    # El usuario borró u alteró completamente esta frase.
-                    # Al no agregarlo a valid_fragments, se elimina de la EDD silenciosamente.
-                    print(f"⚠️ Fragmento eliminado automáticamente en el código '{code_name}' por edición destructiva.")
-                    
-            # Guardamos la lista purgada y actualizada en la EDD
-            self.codes_dict[code_name]["fragments"][doc_name] = valid_fragments
+        dmp.Match_Threshold = 0.3
+        start = dmp.match_main(doc_text, snippet, hint_start)
+        if start == -1:
+            return None, None
+        return start, start + len(snippet)
+
+    # ------------------------------------------------------------------
+    # Delegación: Documentos
+    # ------------------------------------------------------------------
+    def list_documents(self) -> List[str]:
+        return self.doc_manager.list_documents()
+
+    def get_document_path(self, doc_name: str) -> str:
+        return self.doc_manager.get_document_path(doc_name)
+
+    def read_document(self, doc_name: str) -> str:
+        return self.doc_manager.read_document(doc_name)
+
+    def get_document_text(self, doc_name: str) -> str:
+        return self.doc_manager.get_document_text(doc_name)
+
+    def load_all_texts_to_memory(self):
+        self.doc_manager.load_all_texts_to_memory()
+
+    # ------------------------------------------------------------------
+    # Delegación: Códigos
+    # ------------------------------------------------------------------
+    @autosave
+    def add_code(
+        self,
+        code_name: str,
+        hexcolor: str = "#5d9bd3",
+        memo: str = "",
+        parent_name: Optional[str] = None,
+    ):
+        self.code_manager.add_code(code_name, hexcolor, memo, parent_name)
+
+    @autosave
+    def update_code(
+        self,
+        old_name: str,
+        new_name: Optional[str] = None,
+        hexcolor: Optional[str] = None,
+        memo: Optional[str] = None,
+    ):
+        self.code_manager.update_code(old_name, new_name, hexcolor, memo)
+
+        if new_name and new_name != old_name:
+            self.theme_manager.rename_code_in_themes(old_name, new_name)
+            if old_name in self.memo_manager.memos:
+                self.memo_manager.memos[new_name] = self.memo_manager.memos.pop(
+                    old_name
+                )
+
+
+    @autosave
+    def add_fragment(self, code_name: str, doc_name: str, fragment_data: dict):
+        self.code_manager.add_fragment(code_name, doc_name, fragment_data)
+
+    @autosave
+    def sync_code_hierarchy(self, hierarchy: Dict[str, Optional[str]]):
+        self.code_manager.sync_hierarchy(hierarchy)
+
+    # ------------------------------------------------------------------
+    # Delegación: Temas
+    # ------------------------------------------------------------------
+    @autosave
+    def add_theme(self, theme_name: str, memo: str = ""):
+        self.theme_manager.add_theme(theme_name, memo)
+
+    @autosave
+    def delete_theme(self, theme_name: str):
+        self.theme_manager.delete_theme(theme_name)
+
+    @autosave
+    def add_code_to_theme(self, theme_name: str, code_name: str):
+        self.theme_manager.add_code_to_theme(theme_name, code_name)
+
+    @autosave
+    def remove_code_from_theme(self, theme_name: str, code_name: str):
+        self.theme_manager.remove_code_from_theme(theme_name, code_name)
+
+    @autosave
+    def sync_themes(self, themes_data: List[dict]):
+        converted = {
+            t.get("name", "Tema sin nombre"): {
+                "memo": t.get("memo", ""),
+                "codes": t.get("codes", []),
+            }
+            for t in themes_data
+        }
+        self.theme_manager.load_themes(converted)
+
+    # ------------------------------------------------------------------
+    # Delegación: Grupos de Documentos
+    # ------------------------------------------------------------------
+    @autosave
+    def add_group(self, group_name: str):
+        self.group_manager.add_group(group_name)
+
+    @autosave
+    def remove_group(self, group_name: str):
+        self.group_manager.remove_group(group_name)
+
+    @autosave
+    def add_document_to_group(self, doc_name: str, group_name: str):
+        self.group_manager.add_document_to_group(doc_name, group_name)
+
+    @autosave
+    def remove_document_from_group(self, doc_name: str, group_name: str):
+        self.group_manager.remove_document_from_group(doc_name, group_name)
+
+    @autosave
+    def sync_doc_groups(self, doc_groups: Dict[str, List[str]]):
+        """Reemplaza la estructura completa de grupos (usado por drag-and-drop en la Vista)."""
+        self.group_manager.groups = doc_groups
+
+    # ------------------------------------------------------------------
+    # Delegación: Estudios de Caso
+    # ------------------------------------------------------------------
+    @autosave
+    def save_case_studies(self, case_studies: List[dict]):
+        self.case_study_manager.load(case_studies)
+
+    def get_case_studies(self) -> List[dict]:
+        return self.case_study_manager.get_all()
+
+    # ------------------------------------------------------------------
+    # Delegación: Memos
+    # ------------------------------------------------------------------
+    @autosave
+    def set_memo(self, code_name: str, memo_text: str):
+        self.memo_manager.add_or_update_memo(code_name, memo_text)
+
+    @autosave
+    def delete_memo(self, code_name: str):
+        self.memo_manager.delete_memo(code_name)
+
+    # ------------------------------------------------------------------
+    # Delegación: Diario
+    # ------------------------------------------------------------------
+    def get_diary_path(self) -> str:
+        return os.path.join(self.path, "diario.json")

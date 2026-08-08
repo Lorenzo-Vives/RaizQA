@@ -3,184 +3,261 @@ import tempfile
 import zipfile
 import shutil
 import json
+from datetime import datetime
+
 from core.project import Project
 from core.export_manager import ExportManager
 
+
 class MergeManager:
-    """Gestor para la combinación (merge) de dos proyectos .rqa."""
+    """Gestor para la combinación (merge) de dos proyectos .rqa"""
 
     @staticmethod
-    def merge_projects(target_project: Project, rqa_path: str, settings: dict) -> bool:
+    def merge_projects(target_project: Project, rqa_path: str, settings: dict) -> dict:
         """
         Combina un proyecto importado (.rqa) en el proyecto destino (abierto).
-        
-        Args:
-            target_project (Project): El proyecto actualmente abierto.
-            rqa_path (str): Ruta al archivo .rqa a importar.
-            settings (dict): Diccionario con la configuración:
-                - keep_project_memo_from: "open" | "imported"
-                - keep_code_memos_from: "open" | "imported"
-                - dont_import_existing_docs: bool
-                - merge_document_groups: bool
+            dict: Resumen de la fusión (documentos, códigos, fragmentos, etc.)
         """
-        # 1. Crear respaldo del proyecto actual antes de proceder
-        backup_path = os.path.join(target_project.base_path, f"{target_project.name}_backup_antes_de_combinar.rqa")
+        # 1. Crear respaldo del proyecto actual antes de proceder (versionado
+        # con timestamp para no pisar el respaldo de un merge anterior).
+        backup_name = f"{target_project.name}_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.rqa"
+        backup_path = os.path.join(target_project.base_path, backup_name)
         ExportManager.export_project_to_rqa(target_project.path, backup_path)
-        
-        target_state = target_project.load_project_data()
-        
-        try:
-            with tempfile.TemporaryDirectory() as temp_dir:
-                with zipfile.ZipFile(rqa_path, 'r') as zip_ref:
-                    zip_ref.extract("metadata.json", temp_dir)
-                    
-                metadata_path = os.path.join(temp_dir, "metadata.json")
-                with open(metadata_path, 'r', encoding='utf-8') as f:
-                    metadata = json.load(f)
-                    imported_name = metadata.get("name")
-                    
-                extract_path = os.path.join(temp_dir, imported_name)
-                os.makedirs(extract_path, exist_ok=True)
-                
-                with zipfile.ZipFile(rqa_path, 'r') as zip_ref:
-                    zip_ref.extractall(extract_path)
-                    
-                # Cargar el proyecto importado
-                imported_project = Project(imported_name, temp_dir)
-                imported_state = imported_project.load_project_data()
-                
-                # --- Mezclar Documentos ---
-                imported_docs = imported_state.get("documents", [])
-                target_docs = target_state.get("documents", [])
-                
-                for doc in imported_docs:
-                    src_path = os.path.join(imported_project.documents_path, doc)
-                    if not os.path.exists(src_path):
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with zipfile.ZipFile(rqa_path, 'r') as zip_ref:
+                zip_ref.extract("metadata.json", temp_dir)
+
+            metadata_path = os.path.join(temp_dir, "metadata.json")
+            with open(metadata_path, 'r', encoding='utf-8') as f:
+                metadata = json.load(f)
+                imported_name = metadata.get("name")
+
+            if imported_name == target_project.name:
+                raise ValueError("No se puede combinar un proyecto consigo mismo.")
+
+            extract_path = os.path.join(temp_dir, imported_name)
+            os.makedirs(extract_path, exist_ok=True)
+
+            with zipfile.ZipFile(rqa_path, 'r') as zip_ref:
+                zip_ref.extractall(extract_path)
+
+            # Cargar el proyecto importado con la arquitectura de managers actual
+            imported_project = Project(imported_name, temp_dir)
+
+            docs_added, docs_skipped = MergeManager._merge_documents(
+                target_project, imported_project, settings
+            )
+            MergeManager._merge_doc_groups(target_project, imported_project, settings)
+            codes_summary = MergeManager._merge_codes(target_project, imported_project, settings)
+            MergeManager._merge_themes(target_project, imported_project, settings)
+            MergeManager._merge_memos(target_project, imported_project, settings)
+            case_studies_added = MergeManager._merge_case_studies(target_project, imported_project)
+            entries_added = MergeManager._merge_diary(target_project, imported_project)
+
+            # Guardado explícito único al final de la fusión completa
+            target_project.save_state()
+
+            return {
+                "backup_path": backup_path,
+                "documents_added": docs_added,
+                "documents_skipped": docs_skipped,
+                "codes_added": codes_summary["codes_added"],
+                "codes_merged": codes_summary["codes_merged"],
+                "fragments_added": codes_summary["fragments_added"],
+                "fragments_duplicated": codes_summary["fragments_duplicated"],
+                "case_studies_added": case_studies_added,
+                "diary_entries_added": entries_added,
+            }
+
+    # ------------------------------------------------------------------
+    # Documentos
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _merge_documents(target_project: Project, imported_project: Project, settings: dict):
+        target_names = {d["name"] for d in target_project.doc_manager.documents}
+        added, skipped = [], []
+
+        for doc in imported_project.doc_manager.list_documents():
+            src_path = imported_project.doc_manager.get_document_path(doc)
+            if not os.path.exists(src_path):
+                continue
+
+            doc_exists = doc in target_names
+            if doc_exists and settings.get("dont_import_existing_docs", True):
+                skipped.append(doc)
+                continue
+
+            target_path = target_project.doc_manager.get_document_path(doc)
+            old_text = target_project.doc_manager.get_document_text(doc) if doc_exists else None
+            shutil.copy2(src_path, target_path)
+
+            new_text = target_project.doc_manager.read_document(doc)
+            target_project.doc_manager.text_cache[doc] = new_text
+
+            if doc_exists:
+                # Documento sobrescrito: resincronizar offsets de fragmentos existentes
+                # con el nuevo texto, igual que hace update_document_text.
+                if old_text and old_text != new_text:
+                    target_project.code_manager.sync_fragments_for_document(doc, old_text, new_text)
+            else:
+                target_project.doc_manager.register_document(doc)
+                target_names.add(doc)
+
+            added.append(doc)
+
+        return added, skipped
+
+    # ------------------------------------------------------------------
+    # Grupos de documentos
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _merge_doc_groups(target_project: Project, imported_project: Project, settings: dict):
+        target_groups = target_project.group_manager.groups
+        imported_groups = imported_project.group_manager.groups
+
+        for group_name, docs in imported_groups.items():
+            if group_name == "__root__":
+                for d in docs:
+                    if d not in target_groups["__root__"]:
+                        target_groups["__root__"].append(d)
+                continue
+
+            target_group_name = group_name
+            if not settings.get("merge_document_groups", True):
+                # Si no combinamos, renombramos si existe para evitar colisión
+                count = 1
+                while target_group_name in target_groups:
+                    target_group_name = f"{group_name} ({count})"
+                    count += 1
+
+            target_groups.setdefault(target_group_name, [])
+            for d in docs:
+                if d not in target_groups[target_group_name]:
+                    target_groups[target_group_name].append(d)
+
+        target_project.group_manager.groups = target_groups
+
+    # ------------------------------------------------------------------
+    # Códigos y fragmentos (incluye jerarquía padre/hijo y fragmentos de imagen)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _merge_codes(target_project: Project, imported_project: Project, settings: dict) -> dict:
+        target_codes = target_project.code_manager.codes_dict
+        imported_codes = imported_project.code_manager.codes_dict
+        summary = {"codes_added": [], "codes_merged": [], "fragments_added": 0, "fragments_duplicated": 0}
+
+        # 1. Crear códigos faltantes / resolver conflicto de color y memo
+        for code_name, code_obj in imported_codes.items():
+            if code_name not in target_codes:
+                target_project.code_manager.add_code(code_name, code_obj.hexcolor, code_obj.memo)
+                summary["codes_added"].append(code_name)
+            else:
+                summary["codes_merged"].append(code_name)
+                if settings.get("keep_code_color_from") == "imported":
+                    target_codes[code_name].hexcolor = code_obj.hexcolor
+                if settings.get("keep_code_memos_from") == "imported":
+                    target_codes[code_name].memo = code_obj.memo
+
+        # 2. Reconstruir jerarquía padre/hijo del proyecto importado
+        # (MAXQDA fusiona el sistema de códigos como árbol, no como lista plana)
+        for code_name, code_obj in imported_codes.items():
+            if (
+                code_obj.parent
+                and code_obj.parent in target_codes
+                and target_codes[code_name].parent is None
+            ):
+                target_codes[code_name].parent = code_obj.parent
+                if code_name not in target_codes[code_obj.parent].children:
+                    target_codes[code_obj.parent].children.append(code_name)
+
+        # 3. Fusionar fragmentos, deduplicando por igualdad de dataclass Fragment
+        # (incluye type + rect/image_size para no colisionar fragmentos de imagen
+        # con fragmentos de texto que compartan offsets por coincidencia).
+        for code_name, code_obj in imported_codes.items():
+            target_code = target_codes[code_name]
+            for doc_name, fragments in code_obj.fragments.items():
+                existing = target_code.fragments.setdefault(doc_name, [])
+                for frag in fragments:
+                    if frag in existing:
+                        summary["fragments_duplicated"] += 1
                         continue
-                        
-                    doc_exists = doc in target_docs
-                    if settings.get("dont_import_existing_docs", True) and doc_exists:
-                        continue # No sobrescribir
-                        
-                    # Copiar archivo y registrar
-                    target_path = os.path.join(target_project.documents_path, doc)
-                    shutil.copy2(src_path, target_path)
-                    if not doc_exists:
-                        target_project._register_document(doc)
-                        target_docs.append(doc)
-                        
-                # --- Mezclar Grupos de Documentos ---
-                target_groups = target_state.get("doc_groups", {"__root__": []})
-                imported_groups = imported_state.get("doc_groups", {"__root__": []})
-                
-                for group_name, docs in imported_groups.items():
-                    if group_name == "__root__":
-                        for d in docs:
-                            if d not in target_groups["__root__"]:
-                                target_groups["__root__"].append(d)
-                    else:
-                        target_group_name = group_name
-                        if not settings.get("merge_document_groups", True):
-                            # Si no combinamos, renombramos si existe para evitar colisión
-                            count = 1
-                            while target_group_name in target_groups:
-                                target_group_name = f"{group_name} ({count})"
-                                count += 1
-                        
-                        if target_group_name not in target_groups:
-                            target_groups[target_group_name] = []
-                            
-                        for d in docs:
-                            if d not in target_groups[target_group_name]:
-                                target_groups[target_group_name].append(d)
-                                
-                # --- Mezclar Códigos y Fragmentos ---
-                imported_codes = imported_state.get("codes_dict", {})
-                for code_name, code_data in imported_codes.items():
-                    if code_name not in target_project.codes_dict:
-                        target_project.codes_dict[code_name] = {
-                            "hexcolor": code_data.get("hexcolor", "#5d9bd3"),
-                            "memo": code_data.get("memo", ""),
-                            "fragments": {}
-                        }
-                    else:
-                        # Conflicto: decidir memo según configuración
-                        if settings.get("keep_code_memos_from") == "imported":
-                            target_project.codes_dict[code_name]["memo"] = code_data.get("memo", "")
-                            
-                    # Mezclar fragmentos
-                    target_code_data = target_project.codes_dict[code_name]
-                    for doc_name, fragments in code_data.get("fragments", {}).items():
-                        if doc_name not in target_code_data["fragments"]:
-                            target_code_data["fragments"][doc_name] = []
-                            
-                        existing_frags = target_code_data["fragments"][doc_name]
-                        for new_frag in fragments:
-                            is_dup = any(f["start"] == new_frag["start"] and f["end"] == new_frag["end"] for f in existing_frags)
-                            if not is_dup:
-                                existing_frags.append(new_frag)
+                    existing.append(frag)
+                    summary["fragments_added"] += 1
 
-                # --- Mezclar Temas ---
-                imported_themes = imported_state.get("themes_dict", {})
-                for theme_name, theme_data in imported_themes.items():
-                    if theme_name not in target_project.themes_dict:
-                        target_project.add_theme(theme_name, theme_data.get("memo", ""))
-                    else:
-                        if settings.get("keep_code_memos_from") == "imported": # Usamos la misma regla para temas
-                            target_project.themes_dict[theme_name]["memo"] = theme_data.get("memo", "")
-                            
-                    for code in theme_data.get("codes", []):
-                        if code not in target_project.themes_dict[theme_name]["codes"]:
-                            target_project.themes_dict[theme_name]["codes"].append(code)
+        return summary
 
-                # --- Mezclar Memos Generales (memos_dict) ---
-                imported_memos = imported_state.get("memos_dict", {})
-                for memo_id, text in imported_memos.items():
-                    if memo_id not in target_project.memos_dict:
-                        target_project.memos_dict[memo_id] = text
-                    else:
-                        # Determinar quién gana
-                        # Si es el memo del proyecto (asumiendo "__project_memo__" o id del proyecto)
-                        # o si son memos de documentos/códigos.
-                        # Para simplificar, si el memo es "__project_memo__" o igual al nombre del proyecto
-                        if memo_id in ("__project_memo__", "ProjectMemo"):
-                            if settings.get("keep_project_memo_from") == "imported":
-                                target_project.memos_dict[memo_id] = text
-                        else:
-                            if settings.get("keep_code_memos_from") == "imported":
-                                target_project.memos_dict[memo_id] = text
-                                
-                target_project.memo_manager.memos = target_project.memos_dict
+    # ------------------------------------------------------------------
+    # Temas / categorías
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _merge_themes(target_project: Project, imported_project: Project, settings: dict):
+        imported_themes = imported_project.theme_manager.themes_dict
+        for theme_name, theme_obj in imported_themes.items():
+            if theme_name not in target_project.theme_manager.themes_dict:
+                target_project.theme_manager.add_theme(theme_name, theme_obj.memo)
+            elif settings.get("keep_code_memos_from") == "imported":
+                # Usamos la misma regla que para memos de códigos
+                target_project.theme_manager.themes_dict[theme_name].memo = theme_obj.memo
 
-                # --- Mezclar Diario de Codificación ---
-                target_diary = target_project.diary_manager
-                imported_diary = imported_project.diary_manager
-                
-                # Combinamos y eliminamos duplicados
-                combined_entries = target_diary.entries + imported_diary.entries
-                unique_entries = []
-                seen = set()
-                for entry in combined_entries:
-                    # Usamos author, date y message como firma única
-                    signature = (entry.get("author", ""), entry.get("date", ""), entry.get("message", ""))
-                    if signature not in seen:
-                        seen.add(signature)
-                        unique_entries.append(entry)
-                        
-                # Ordenar cronológicamente
-                unique_entries.sort(key=lambda x: x.get("date", ""))
-                target_diary.entries = unique_entries
-                target_diary.save_diary()
+            for code in theme_obj.codes:
+                target_project.theme_manager.add_code_to_theme(theme_name, code)
 
-                # Guardar todo en disco
-                target_project.save_project_data(
-                    documents=target_docs,
-                    highlights=target_state.get("highlights", {}),
-                    doc_groups=target_groups,
-                    themes=target_state.get("themes")
-                )
-                
-                return True
-        except Exception as e:
-            print(f"Error durante el merge: {e}")
-            raise e
+    # ------------------------------------------------------------------
+    # Memos generales (proyecto, códigos, documentos)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _merge_memos(target_project: Project, imported_project: Project, settings: dict):
+        target_memos = target_project.memo_manager.memos
+        imported_memos = imported_project.memo_manager.memos
+
+        for memo_id, text in imported_memos.items():
+            if memo_id not in target_memos:
+                target_memos[memo_id] = text
+            elif memo_id in ("__project_memo__", "ProjectMemo"):
+                if settings.get("keep_project_memo_from") == "imported":
+                    target_memos[memo_id] = text
+            else:
+                if settings.get("keep_code_memos_from") == "imported":
+                    target_memos[memo_id] = text
+
+    # ------------------------------------------------------------------
+    # Estudios de caso
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _merge_case_studies(target_project: Project, imported_project: Project) -> int:
+        target_cs = target_project.case_study_manager.case_studies
+        existing_names = {cs.get("name") for cs in target_cs}
+        added = 0
+        for cs in imported_project.case_study_manager.get_all():
+            if cs.get("name") not in existing_names:
+                target_cs.append(cs)
+                existing_names.add(cs.get("name"))
+                added += 1
+        return added
+
+    # ------------------------------------------------------------------
+    # Diario de codificación
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _merge_diary(target_project: Project, imported_project: Project) -> int:
+        target_diary = target_project.diary_manager
+        imported_diary = imported_project.diary_manager
+
+        combined_entries = target_diary.entries + imported_diary.entries
+        unique_entries = []
+        seen = set()
+        for entry in combined_entries:
+            # Usamos author, date y message como firma única
+            signature = (entry.get("author", ""), entry.get("date", ""), entry.get("message", ""))
+            if signature not in seen:
+                seen.add(signature)
+                unique_entries.append(entry)
+
+        added = max(len(unique_entries) - len(target_diary.entries), 0)
+
+        # Ordenar cronológicamente
+        unique_entries.sort(key=lambda x: x.get("date", ""))
+        target_diary.entries = unique_entries
+        target_diary.save_diary()
+        return added

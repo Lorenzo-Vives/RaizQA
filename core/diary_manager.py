@@ -17,7 +17,6 @@ class DiaryManager:
     def load_diary(self):
         """Carga el diario desde el JSON. Si no existe, inicia vacío."""
         if not os.path.exists(self.diary_file):
-            # Opcional: Aquí podrías leer un .txt antiguo si existiera
             return
 
         try:
