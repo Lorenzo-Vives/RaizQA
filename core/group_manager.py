@@ -2,19 +2,13 @@ import os
 import platform
 import subprocess
 import logging
-
 from typing import Dict, List
-
 from core.constants import (TEXT_EXTENSIONS, IMAGE_EXTENSIONS) 
-
 
 logger = logging.getLogger(__name__)
 
-
 def get_file_extension(file_path: str) -> str:
     return os.path.splitext(file_path)[1].lower()
-
-
 
 def hide_directory(path: str) -> str:
     """
@@ -39,9 +33,6 @@ def hide_directory(path: str) -> str:
     except Exception as e:
         logger.warning(f"No se pudo ocultar directorio {path}: {e}")
     return path
-
-
-
 
 # ----------------------------------------------------------------------
 # Gestor de Grupos de Documentos
@@ -76,8 +67,9 @@ class GroupManager:
             self.groups.setdefault("__root__", []).append(doc_name)
 
     def _remove_document_from_all_groups_internal(self, doc_name: str):
-        """Quita el documento de cualquier grupo sin reinsertarlo en __root__
-        (usado como paso previo a moverlo a otro grupo, para no duplicarlo)."""
+        """
+        Quita el documento de cualquier grupo sin reinsertarlo en __root__
+        """
         for group_name, docs in self.groups.items():
             if doc_name in docs:
                 docs.remove(doc_name)

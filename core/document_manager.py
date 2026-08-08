@@ -3,17 +3,11 @@ import json
 import shutil
 import logging
 from typing import Dict, List, Optional, Tuple
-
-
-from typing import Dict, List, Optional
 from core.constants import (TEXT_EXTENSIONS, IMAGE_EXTENSIONS,
                             ALLOWED_EXTENSIONS)
-
 from core.document_parser import DocumentParser 
                             
 logger = logging.getLogger(__name__)
-
-
 
 def get_file_extension(file_path: str) -> str:
     return os.path.splitext(file_path)[1].lower()
@@ -54,9 +48,6 @@ class DocumentManager:
         else:
             meta = self._read_metadata()
             self.documents = [{"name": d} for d in meta.get("documents", [])]
-            # Backfill de "name" para proyectos creados antes de este fix
-            # (import_manager.py y MergeManager dependen de esta clave para
-            # identificar el proyecto dentro de un .rqa).
             if not meta.get("name") and self.project_name:
                 self._write_metadata({**meta, "name": self.project_name})
 

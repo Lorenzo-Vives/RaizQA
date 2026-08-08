@@ -1,8 +1,12 @@
 import os
 import shutil
 import docx.shared
-from docx import Document
+import openpyxl
+import json
+import tempfile
 from datetime import datetime
+from docx import Document
+from openpyxl.styles import Font, PatternFill, Alignment
 
 class ExportManager:
     """Maneja la exportación de datos del proyecto (Diario, Excel, etc) puro, sin dependencias GUI."""
@@ -46,8 +50,6 @@ class ExportManager:
     @staticmethod
     def export_code_tree(rows, export_path):
         """Exporta el libro de códigos (jerarquía) a Excel."""
-        import openpyxl
-        
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "Libro de códigos"
@@ -58,7 +60,6 @@ class ExportManager:
     @staticmethod
     def export_code_fragments(selected_rows, fragment_rows, export_path):
         """Exporta el libro de códigos y sus fragmentos asociados a Excel."""
-        import openpyxl
 
         wb = openpyxl.Workbook()
         
@@ -75,7 +76,6 @@ class ExportManager:
 
     @staticmethod
     def _write_codebook_sheet(worksheet, rows, title_text="Libro de códigos", frequency_label="Frecuencia"):
-        from openpyxl.styles import Font, PatternFill, Alignment
 
         header = [title_text, "", "", "", "Memo", frequency_label]
         worksheet.append(header)
@@ -125,7 +125,6 @@ class ExportManager:
 
     @staticmethod
     def _write_fragments_sheet(worksheet, fragment_rows):
-        from openpyxl.styles import Font, PatternFill, Alignment
 
         header = ["Código", "Documento", "Fragmento", "Memo"]
         worksheet.append(header)
@@ -183,18 +182,7 @@ class ExportManager:
         """
         Exporta los documentos, códigos, temas y memos seleccionados a un archivo
         de intercambio con formato .rex.
-
-        Args:
-            project (Project): El proyecto actual de RaizQA del cual extraer los datos.
-            selected_docs (list): Lista de nombres de documentos a exportar.
-            selected_codes (list): Lista de nombres de códigos a exportar.
-            options (dict): Diccionario con opciones extra (como include_memos y code_themes).
-            export_path (str): Ruta donde se guardará el archivo .rex generado.
         """
-        import json
-        import zipfile
-        import tempfile
-        
         include_memos = options.get("include_memos", False)
         
         if not export_path.lower().endswith(".rex"):

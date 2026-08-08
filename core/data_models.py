@@ -1,9 +1,15 @@
+import logging
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
+logger = logging.getLogger(__name__)
 
 @dataclass(slots=True)
 class Fragment:
+    """
+    Modelar una porción citada de un documento: 
+    un rango de texto o una región de imagen
+    """
     type: str = "text"
     start: Optional[int] = None
     end: Optional[int] = None
@@ -50,7 +56,7 @@ class Fragment:
 @dataclass(slots=True)
 class Code:
     """
-    Modelar un código de análisis, su jerarquía y los fragmentos asociados.
+    Modela un código de análisis, su jerarquía y los fragmentos asociados.
     """
     hexcolor: str = "#5d9bd3"
     memo: str = ""
@@ -87,7 +93,7 @@ class Code:
 @dataclass(slots=True)
 class Theme:
     """
-    Modelar un tema que puede agrupar múltiples códigos.
+    Modela un tema que puede agrupar múltiples códigos.
     """
     memo: str = ""
     codes: List[str] = field(default_factory=list)

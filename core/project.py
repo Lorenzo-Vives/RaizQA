@@ -93,9 +93,6 @@ class Project:
         
 
     def _ensure_structure(self):
-        """
-        Nos aseguramos de que esten los directorios necesarios creados
-        """
         os.makedirs(self.path, exist_ok=True)
 
     def _load_state(self):
@@ -119,7 +116,6 @@ class Project:
                     pass
         self.memo_manager.memos = memos
 
-        # Grupos de documentos
         doc_groups = data.get("doc_groups")
         if doc_groups:
             self.group_manager.groups = doc_groups
@@ -153,8 +149,6 @@ class Project:
             }
             ok = self.storage.save(self.path, state)
             if not ok:
-                # No lo tragamos en silencio: un fallo de disco debe ser visible
-                # de inmediato, no descubierto 30s después por un timer que ya no existe.
                 raise IOError(
                     f"No se pudo guardar el estado del proyecto '{self.name}' en disco."
                 )

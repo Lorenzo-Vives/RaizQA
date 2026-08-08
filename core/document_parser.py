@@ -1,16 +1,12 @@
 from docx import Document as DocxDocument
 import logging
-
 import pymupdf
 """
-OBSERVACION:
+IMPORTANTE:
 La licencia de pymupdf no permite uso comercial gratuito
 """
 
 logger = logging.getLogger(__name__)
-
-
-
 
 # ----------------------------------------------------------------------
 # Parseo de Documentos
@@ -31,10 +27,6 @@ class DocumentParser:
                 
                 if not doc.is_encrypted:
                     return "\n".join(text for page in doc if (text := page.get_text().strip()))
-
-        except FileNotFoundError:
-            logger.error(f"El archivo no fue encontrado: {file_path}")
-            return ""
     
         except pymupdf.FileDataError:
             logger.error(f"El archivo está corrupto o no es un PDF válido: {file_path}")
@@ -45,7 +37,6 @@ class DocumentParser:
             return ""
             
         except Exception as e:
-            # Captura cualquier otro error inesperado (ej. problemas de memoria)
             logger.error(f"Error inesperado al leer {file_path}: {str(e)}")
             return ""
 
