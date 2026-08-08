@@ -77,6 +77,7 @@ class ControladorLogico(QObject):
     # ==========================================
     # BÚSQUEDA
     # ==========================================
+    
     def req_global_search(self, term, project, codes, memo_manager):
         """Petición asíncrona de la interfaz para iniciar la búsqueda."""
         if not term:
@@ -94,28 +95,27 @@ class ControladorLogico(QObject):
     # EXPORTACIONES SÍNCRONAS
     # ==========================================
     def req_export_diary(self, diary_text, project_name, export_path):
-        """Petición de la UI para exportar el diario."""
         try:
             ExportManager.export_diary(diary_text, project_name, export_path)
             self.export_success.emit("Diario", export_path)
-        except Exception as e:
-            self.export_error.emit("Diario", str(e))
+        except (OSError, ValueError) as e:
+            self.export_error.emit("Diario", e)
 
     def req_export_code_tree(self, rows, export_path):
         """Petición de la UI para exportar el libro de códigos."""
         try:
             ExportManager.export_code_tree(rows, export_path)
             self.export_success.emit("Libro de códigos", export_path)
-        except Exception as e:
-            self.export_error.emit("Libro de códigos", str(e))
+        except (OSError, ValueError) as e:
+            self.export_error.emit("Libro de códigos", e)
 
     def req_export_code_fragments(self, selected_rows, fragment_rows, export_path):
         """Petición de la UI para exportar fragmentos de códigos."""
         try:
             ExportManager.export_code_fragments(selected_rows, fragment_rows, export_path)
             self.export_success.emit("Fragmentos de códigos", export_path)
-        except Exception as e:
-            self.export_error.emit("Fragmentos de códigos", str(e))
+        except OSError as e:
+            self.export_error.emit("Fragmentos de códigos", e)
 
     # ==========================================
     # EXPORTACIONES / IMPORTACIONES ASÍNCRONAS
@@ -191,16 +191,15 @@ class ControladorLogico(QObject):
         try:
             self.current_project.save_state()
             self.project_saved.emit()
-        except Exception:
-            self.error_occurred.emit(f"No se pudo guardar el proyecto:\n{str(e)}")
-            return
+        except OSError as e:
+            self.error_occurred.emit(f"No se pudo guardar el proyecto:\n{e}")
     
     def req_create_project(self, name, working_dir):
         """Petición para crear un proyecto nuevo. El controlador es el único dueño de current_project."""
         try:
             self.current_project = Project(name, working_dir)
-        except Exception as e:
-            self.error_occurred.emit(f"Error al crear proyecto: {str(e)}")
+        except OSError as e:
+            self.error_occurred.emit(f"Error al crear proyecto: {e}")
             return
         self.project_loaded.emit(self.current_project)
 
@@ -208,8 +207,8 @@ class ControladorLogico(QObject):
         """Petición para abrir un proyecto existente y cargar sus EDDs."""
         try:
             self.current_project = Project(name, working_dir)
-        except Exception as e:
-            self.error_occurred.emit(f"Error al abrir proyecto: {str(e)}")
+        except OSError as e:
+            self.error_occurred.emit(f"Error al abrir proyecto: {e}")
             return
         self.project_loaded.emit(self.current_project)
 
@@ -224,9 +223,9 @@ class ControladorLogico(QObject):
                 self.current_project.add_document_to_group(file_name, folder)
             self.document_imported.emit(file_name, folder, self.current_project.group_manager.groups)
         except ValueError as e:
-            self.error_occurred.emit(str(e))
-        except Exception as e:
-            self.error_occurred.emit(f"No se pudo procesar el archivo: {str(e)}")
+            self.error_occurred.emit(e)
+        except OSError as e:
+            self.error_occurred.emit(f"No se pudo procesar el archivo: {e}")
 
     def req_add_group(self, name):
         """Petición para crear una carpeta/grupo de documentos nueva."""
@@ -235,8 +234,8 @@ class ControladorLogico(QObject):
         try:
             self.current_project.add_group(name)
             self.group_added.emit(name, self.current_project.group_manager.groups)
-        except Exception as e:
-            self.error_occurred.emit(f"Error al crear carpeta: {str(e)}")
+        except OSError as e:
+            self.error_occurred.emit(f"Error al crear carpeta: {e}")
 
     def req_move_document(self, doc_name, target_folder):
         """Petición para mover un documento a otra carpeta (o a la raíz)."""
@@ -244,15 +243,14 @@ class ControladorLogico(QObject):
             return
         try:
             if target_folder == "__root__":
-                self.current_project.group_manager.remove_document_from_all_groups(doc_name)
-                self.current_project.save_state()
+                self.current_project.remove_document_from_all_groups(doc_name)
             else:
                 self.current_project.add_document_to_group(doc_name, target_folder)
             self.document_moved.emit(
                 doc_name, target_folder, self.current_project.group_manager.groups
             )
-        except Exception as e:
-            self.error_occurred.emit(f"Error al mover documento: {str(e)}")
+        except OSError as e:
+            self.error_occurred.emit(f"Error al mover documento: {e}")
 
     def req_sync_doc_groups(self, doc_groups):
         """Petición para reemplazar la estructura completa de grupos (drag-and-drop)."""
@@ -260,8 +258,8 @@ class ControladorLogico(QObject):
             return
         try:
             self.current_project.sync_doc_groups(doc_groups)
-        except Exception as e:
-            self.error_occurred.emit(f"Error al sincronizar carpetas: {str(e)}")
+        except OSError as e:
+            self.error_occurred.emit(f"Error al sincronizar carpetas: {e}")
 
     def req_sync_code_hierarchy(self, hierarchy):
         """Petición para reasignar la jerarquía padre/hijo de los códigos (drag-and-drop)."""
@@ -273,8 +271,8 @@ class ControladorLogico(QObject):
                 self.current_project.code_manager.get_all_codes(),
                 self.current_project.theme_manager.get_all_themes(),
             )
-        except Exception as e:
-            self.error_occurred.emit(f"Error al reorganizar códigos: {str(e)}")
+        except OSError as e:
+            self.error_occurred.emit(f"Error al reorganizar códigos: {e}")
 
     def req_sync_themes(self, themes_data):
         """Petición para sincronizar temas/categorías desde el diálogo de temas."""
@@ -286,8 +284,8 @@ class ControladorLogico(QObject):
                 self.current_project.code_manager.get_all_codes(),
                 self.current_project.theme_manager.get_all_themes(),
             )
-        except Exception as e:
-            self.error_occurred.emit(f"Error al sincronizar temas: {str(e)}")
+        except OSError as e:
+            self.error_occurred.emit(f"Error al sincronizar temas: {e}")
 
     def req_save_case_studies(self, case_studies):
         """Petición para guardar la lista de estudios de caso."""
@@ -295,8 +293,8 @@ class ControladorLogico(QObject):
             return
         try:
             self.current_project.save_case_studies(case_studies)
-        except Exception as e:
-            self.error_occurred.emit(f"Error al guardar estudios de caso: {str(e)}")
+        except OSError as e:
+            self.error_occurred.emit(f"Error al guardar estudios de caso: {e}")
 
     def req_set_memo(self, code_name, memo_text):
         """Petición para crear o actualizar el memo de un código."""
@@ -305,8 +303,8 @@ class ControladorLogico(QObject):
         try:
             self.current_project.set_memo(code_name, memo_text)
             self.memo_updated.emit(code_name, memo_text)
-        except Exception as e:
-            self.error_occurred.emit(f"Error al guardar memo: {str(e)}")
+        except OSError as e:
+            self.error_occurred.emit(f"Error al guardar memo: {e}")
 
     def req_delete_memo(self, code_name):
         """Petición para eliminar el memo de un código."""
@@ -315,12 +313,13 @@ class ControladorLogico(QObject):
         try:
             self.current_project.delete_memo(code_name)
             self.memo_updated.emit(code_name, "")
-        except Exception as e:
-            self.error_occurred.emit(f"Error al eliminar memo: {str(e)}")
+        except OSError as e:
+            self.error_occurred.emit(f"Error al eliminar memo: {e}")
 
     # ==========================================
     # GESTIÓN DE CÓDIGOS
     # ==========================================
+            
     def req_add_code(self, code_name, hexcolor, memo, parent_name=""):
         if not self.current_project:
             return
@@ -328,18 +327,15 @@ class ControladorLogico(QObject):
             p_name = parent_name if parent_name else None
             self.current_project.add_code(code_name, hexcolor, memo, parent_name=p_name)
 
-            if memo and hasattr(self.current_project.memo_manager, "add_or_update_memo"):
-                try:
-                    self.current_project.memo_manager.add_or_update_memo(code_name, memo)
-                except Exception:
-                    pass
+            if memo:
+                self.current_project.set_memo(code_name, memo)
 
             self.edds_updated.emit(
                 self.current_project.code_manager.get_all_codes(),
                 self.current_project.theme_manager.get_all_themes(),
             )
-        except Exception as e:
-            self.error_occurred.emit(f"Error al agregar código: {str(e)}")
+        except OSError as e:
+            self.error_occurred.emit(f"Error al agregar código: {e}")
 
     def req_delete_code(self, code_name, cascade=False):
         if not self.current_project:
@@ -350,8 +346,8 @@ class ControladorLogico(QObject):
                 self.current_project.code_manager.get_all_codes(),
                 self.current_project.theme_manager.get_all_themes(),
             )
-        except Exception as e:
-            self.error_occurred.emit(f"Error al eliminar código: {str(e)}")
+        except OSError as e:
+            self.error_occurred.emit(f"Error al eliminar código: {e}")
 
     def req_update_code(self, old_name, new_name, hexcolor, memo):
         if not self.current_project:
@@ -362,8 +358,8 @@ class ControladorLogico(QObject):
                 self.current_project.code_manager.get_all_codes(),
                 self.current_project.theme_manager.get_all_themes(),
             )
-        except Exception as e:
-            self.error_occurred.emit(f"Error al actualizar código: {str(e)}")
+        except OSError as e:
+            self.error_occurred.emit(f"Error al actualizar código: {e}")
 
     def req_add_fragment(self, code_name, doc_name, fragment_data):
         if not self.current_project:
@@ -374,8 +370,8 @@ class ControladorLogico(QObject):
                 self.current_project.code_manager.get_all_codes(),
                 self.current_project.theme_manager.get_all_themes(),
             )
-        except Exception as e:
-            self.error_occurred.emit(f"Error al agregar fragmento: {str(e)}")
+        except OSError as e:
+            self.error_occurred.emit(f"Error al agregar fragmento: {e}")
 
     # ==========================================
     # GESTIÓN DE DOCUMENTOS
@@ -390,5 +386,5 @@ class ControladorLogico(QObject):
                 self.current_project.code_manager.get_all_codes(),
                 self.current_project.theme_manager.get_all_themes(),
             )
-        except Exception as e:
-            self.error_occurred.emit(f"Error al guardar el documento editado: {str(e)}")
+        except OSError as e:
+            self.error_occurred.emit(f"Error al guardar el documento editado: {e}")

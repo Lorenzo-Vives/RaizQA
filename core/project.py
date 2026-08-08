@@ -179,6 +179,10 @@ class Project:
         self.doc_manager.write_text(doc_name, new_text)
         self.doc_manager.text_cache[doc_name] = new_text
         self.code_manager.sync_fragments_for_document(doc_name, old_text, new_text)
+        
+    @autosave
+    def remove_document_from_all_groups(self, doc_name: str):
+        self.group_manager.remove_document_from_all_groups(doc_name)
 
     @autosave
     def delete_code(self, code_name: str, cascade: bool = False):
