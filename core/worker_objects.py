@@ -134,7 +134,7 @@ class ImportExchangeWorker(QRunnable):
             self.signals.error.emit(f"Error al importar archivo de intercambio: {e}")
 
 class MergeWorkerSignals(QObject):
-    finished = Signal()
+    finished = Signal(dict)
     error = Signal(str)
 
 class MergeWorker(QRunnable):
