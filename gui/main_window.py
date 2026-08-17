@@ -1,7 +1,7 @@
 import os
 import shutil
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QSplitter,
     QListWidget, QListWidgetItem, QFileDialog, QMessageBox, QInputDialog, QFrame, QLineEdit, QSizeGrip,
     QTreeWidget, QTreeWidgetItem, QMenu, QDialog, QHeaderView, QTreeWidgetItemIterator,
     QGridLayout, QDialogButtonBox, QFileIconProvider, QAbstractItemView, QTextEdit,
@@ -252,13 +252,25 @@ class RaizQAGUI(QMainWindow):
         content_frame.setObjectName("ContentFrame")
         content_layout = QHBoxLayout(content_frame)
         content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(12)
+        content_layout.setSpacing(0)
 
-        left_layout = QVBoxLayout()
-        left_layout.setSpacing(12)
+        # Splitter horizontal: columna izquierda (docs+códigos) vs. visor de texto
+        main_splitter = QSplitter(Qt.Horizontal)
+        main_splitter.setObjectName("MainSplitter")
+        main_splitter.setChildrenCollapsible(False)
+        main_splitter.setHandleWidth(10)
+        content_layout.addWidget(main_splitter)
+
+        # Splitter vertical: documentos vs. árbol de códigos
+        left_splitter = QSplitter(Qt.Vertical)
+        left_splitter.setObjectName("LeftSplitter")
+        left_splitter.setChildrenCollapsible(False)
+        left_splitter.setHandleWidth(10)
 
         docs_card = QFrame()
         docs_card.setObjectName("PanelCard")
+        docs_card.setMinimumHeight(120)
+        docs_card.setMinimumWidth(220)
         docs_layout = QVBoxLayout(docs_card)
         docs_layout.setContentsMargins(12, 12, 12, 12)
         docs_layout.setSpacing(8)
@@ -290,10 +302,12 @@ class RaizQAGUI(QMainWindow):
         self.doc_tree.setDropIndicatorShown(True)
         self.doc_tree.setDefaultDropAction(Qt.MoveAction)
         docs_layout.addWidget(self.doc_tree, 50)
-        left_layout.addWidget(docs_card, 1)
+        left_splitter.addWidget(docs_card)
 
         code_card = QFrame()
         code_card.setObjectName("PanelCard")
+        code_card.setMinimumHeight(150)
+        code_card.setMinimumWidth(220)
         code_layout = QVBoxLayout(code_card)
         code_layout.setContentsMargins(12, 12, 12, 12)
         code_layout.setSpacing(8)
@@ -332,7 +346,10 @@ class RaizQAGUI(QMainWindow):
         self.code_tree.setDefaultDropAction(Qt.MoveAction)
         self.code_tree.setEditTriggers(QAbstractItemView.NoEditTriggers)
         code_layout.addWidget(self.code_tree, 60)
-        left_layout.addWidget(code_card, 2)
+        left_splitter.addWidget(code_card)
+        left_splitter.setStretchFactor(0, 1)
+        left_splitter.setStretchFactor(1, 2)
+        left_splitter.setSizes([220, 440])
 
         # Eventos
         self._code_tree_updating = False
@@ -343,10 +360,11 @@ class RaizQAGUI(QMainWindow):
         self.code_tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.code_tree.customContextMenuRequested.connect(self.code_tree_context_menu)
 
-        content_layout.addLayout(left_layout, 38)
+        main_splitter.addWidget(left_splitter)
 
         text_card = QFrame()
         text_card.setObjectName("PanelCard")
+        text_card.setMinimumWidth(300)
         text_layout = QVBoxLayout(text_card)
         text_layout.setContentsMargins(12, 12, 12, 12)
         text_layout.setSpacing(8)
@@ -392,7 +410,10 @@ class RaizQAGUI(QMainWindow):
         self.viewer_stack.addWidget(self.image_viewer)
 
         text_layout.addWidget(self.viewer_stack, 1)
-        content_layout.addWidget(text_card, 62)
+        main_splitter.addWidget(text_card)
+        main_splitter.setStretchFactor(0, 38)
+        main_splitter.setStretchFactor(1, 62)
+        main_splitter.setSizes([380, 620])
 
         # -------------------- BUSCADOR LOCAL MODULAR (CTRL+F) --------------------
         self.local_search_widget = LocalSearchWidget(self.text_area, parent=self)
@@ -435,7 +456,7 @@ class RaizQAGUI(QMainWindow):
             ("Seleccionar Working Directory", self.select_working_dir),
             ("Crear Proyecto", self.create_project),
             ("Abrir Proyecto", self.open_project),
-            ("Importar Archivo", self.import_file),
+            ("Importar Archivo(s)", self.import_file),
             ("Guardar Proyecto", self.save_project),
             ("Guardar Proyecto Como...", self.save_project_as),
             ("Exportar libro de códigos", self.export_code_tree),
@@ -1682,44 +1703,69 @@ class RaizQAGUI(QMainWindow):
         if not self.current_project:
             QMessageBox.warning(self, "Importar archivo", "Primero crea o abre un proyecto.")
             return
-        file_path, _ = QFileDialog.getOpenFileName(
+        file_paths, _ = QFileDialog.getOpenFileNames( # aqui simplemente se cambió getOpenFilename -> getOpenFileNames
             self,
-            "Seleccionar archivo",
+            "Seleccionar archivo(s)",
             "",
             "Documentos o imagenes (*.txt *.pdf *.docx *.png *.jpg *.jpeg *.bmp *.gif *.tiff)",
         )
-        if not file_path:
+        if not file_paths:
             return
 
-        try:
-            file_name, _ = self.current_project.import_document(file_path)
-        except ValueError as err:
-            QMessageBox.warning(self, "Importar archivo", str(err))
-            return
-        except Exception as err:
-            QMessageBox.critical(self, "Importar archivo", f"No se pudo procesar el archivo:\n{err}")
-            return
-
-        existing = self._all_documents()
         folder = self._current_folder_name()
-        new_item = None
-        if file_name not in existing:
-            self.doc_groups.setdefault(folder, []).append(file_name)
-            new_item = self._add_doc_item(file_name, self._find_folder_item(folder))
-        else:
-            found = self.doc_tree.findItems(file_name, Qt.MatchExactly | Qt.MatchRecursive, 0)
-            if found:
-                new_item = found[0]
+        imported = []
+        errors = []
+        last_item = None
 
-        self.current_doc = file_name
-        if new_item:
-            self.doc_tree.setCurrentItem(new_item)
-            self.display_document(new_item)
-        else:
-            self.display_document(self.doc_tree.currentItem())
-        self._rebuild_doc_groups_from_tree()
-        self.save_project()
-        QMessageBox.information(self, "Importar", f"Archivo '{file_name}' importado correctamente.")
+        # se importa luego cada documento seleccionado.
+        for file_path in file_paths:
+            try:
+                file_name, _ = self.current_project.import_document(file_path)
+            except ValueError as err:
+                errors.append((os.path.basename(file_path), str(err)))
+                continue
+            except Exception as err:
+                errors.append((os.path.basename(file_path), str(err)))
+                continue
+
+            existing = self._all_documents() # aca se verifican los dctos que se muestran en la GUI [no lo escritos]
+            if file_name not in existing:    # es decir, arriba se "cargan en el back" aqui se muestran en la gui.
+                self.doc_groups.setdefault(folder, []).append(file_name)
+                last_item = self._add_doc_item(file_name, self._find_folder_item(folder))
+            else:
+                found = self.doc_tree.findItems(file_name, Qt.MatchExactly | Qt.MatchRecursive, 0)
+                last_item = found[0] if found else last_item
+            imported.append(file_name)
+
+        if imported:
+            self.current_doc = imported[-1]
+            if last_item:
+                self.doc_tree.setCurrentItem(last_item)
+                self.display_document(last_item)
+            else:
+                self.display_document(self.doc_tree.currentItem())
+            self._rebuild_doc_groups_from_tree()
+            self.save_project()
+
+        self._show_import_summary(imported, errors)
+
+    def _show_import_summary(self, imported, errors):
+        if imported and not errors:
+            if len(imported) == 1:
+                QMessageBox.information(self, "Importar", f"Archivo '{imported[0]}' importado correctamente.")
+            else:
+                QMessageBox.information(self, "Importar", f"{len(imported)} archivos importados correctamente.")
+        elif imported and errors:
+            detalle = "\n".join(f"- {name}: {reason}" for name, reason in errors)
+            QMessageBox.warning(
+                self,
+                "Importar",
+                f"{len(imported)} archivo(s) importados correctamente.\n"
+                f"{len(errors)} archivo(s) no se pudieron importar:\n{detalle}",
+            )
+        elif errors:
+            detalle = "\n".join(f"- {name}: {reason}" for name, reason in errors)
+            QMessageBox.critical(self, "Importar", f"No se pudo importar ningún archivo:\n{detalle}")
 
 # -------------------- DOCUMENTO --------------------
     def display_document(self, current, previous=None):
