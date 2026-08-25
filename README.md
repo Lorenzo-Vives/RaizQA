@@ -6,7 +6,7 @@ RaizQA 🌱 es una aplicacion de analisis cualitativo escrita en Python con PySi
 
 ### Windows
 
-- Descarga la última versión: RaizQA v1.0piloto — https://github.com/Lorenzo-Vives/RaizQA/releases/download/v1.0piloto/RaizQA.exe
+- Descarga la última versión: RaizQA v1.1piloto — [https://github.com/Lorenzo-Vives/RaizQA/releases/download/v1.0piloto/RaizQA.exe](https://github.com/Lorenzo-Vives/RaizQA/releases/download/v1.1piloto/RaizQA.exe)
 
 ## ⚠️ Nota: Windows puede mostrar una advertencia. Usa “Más información” → “Ejecutar de todas formas”.
 
