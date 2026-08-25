@@ -81,6 +81,19 @@ QPushButton#WindowButtonClose:hover {{
     background-color: #e81123;
     color: #ffffff;
 }}
+QLineEdit, QTextEdit {{
+    background-color: {text_bg};
+    color: {text_fg};
+    placeholder-text-color: {muted_text};
+    border: 1px solid {border};
+    border-radius: 5px;
+    padding: 4px 7px;
+    selection-background-color: {selection};
+    selection-color: {highlight_text};
+}}
+QLineEdit:focus, QTextEdit:focus {{
+    border-color: {selection};
+}}
 QLineEdit#SearchField {{
     background-color: {text_bg};
     color: {text_fg};

@@ -59,6 +59,7 @@ def apply_theme_to_window(window, is_dark_mode):
     palette.setColor(QPalette.Text, QColor(theme["text_fg"]))
     palette.setColor(QPalette.Button, QColor(theme["button_bg"]))
     palette.setColor(QPalette.ButtonText, QColor(theme["button_fg"]))
+    palette.setColor(QPalette.PlaceholderText, QColor(theme["muted_text"]))
     palette.setColor(QPalette.Highlight, QColor(theme["selection"]))
     palette.setColor(QPalette.HighlightedText, QColor(highlight_text))
 

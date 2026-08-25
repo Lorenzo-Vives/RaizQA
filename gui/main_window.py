@@ -2035,9 +2035,9 @@ class RaizQAGUI(QMainWindow):
     def _image_context_menu(self, scene_pos=None, global_pos=None, target_fragment=None):
         selection = self._image_selection_payload()
         has_selection = bool(selection and selection.get("rect"))
+        menu = QMenu(self)
         create_code_action = menu.addAction("Crear nuevo codigo para zona" if has_selection else "Crear nuevo codigo para imagen")
         create_subcode_action = menu.addAction("Crear subcodigo para zona" if has_selection else "Crear subcodigo para imagen")
-        menu = QMenu(self)
         if self.codes_dict:
             add_to_existing = menu.addMenu("Agregar a codigo existente")
             for code_name in self.codes_dict:
@@ -2196,67 +2196,68 @@ class RaizQAGUI(QMainWindow):
         self.signal_req_add_code.emit(code_label, color_hex, memo, parent_name)
         
         # 2. Construir el paquete de datos del fragmento
-        if is_image and image_selection:
-            fragment_data = {
-                "type": "image",
-                "rect": image_selection["rect"],
-                "image_size": image_selection["image_size"],
-                "note": note
-            }
-        else:
-            fragment_data = {
-                "type": "text",
-                "start": start,
-                "end": end
-            }
+        fragment_data = self._build_fragment_data(
+            start, end, is_image=is_image, note=note, image_selection=image_selection
+        )
 
         # 3. Emitir el fragmento al backend
         self.signal_req_add_fragment.emit(code_label, self.current_doc, fragment_data)
 
         # 4. Dibujar localmente de inmediato
-        fragment_visual = fragment_data.copy()
-        fragment_visual["color"] = color_hex
-        fragment_visual["document"] = self.current_doc
+        self._display_fragment_immediately(fragment_data, color_hex)
 
 
     def add_to_existing_code(self, code_name, selected_text, start, end, is_image=False, note=None, image_selection=None):
-        if is_image:
-            self.highlighted.append(fragment_visual)
-            self.restore_highlights()
-        else:
-            self.highlight_fragment(fragment_visual, QColor(color_hex))
-
         if not self.current_doc or code_name not in self.codes_dict:
             return
 
         # Construir el paquete de datos del fragmento
-        if is_image and image_selection:
-            fragment_data = {
-                "type": "image",
-                "rect": image_selection["rect"],
-                "image_size": image_selection["image_size"],
-                "note": note
-            }
-        else:
-            fragment_data = {
-                "type": "text",
-                "start": start,
-                "end": end
-            }
+        fragment_data = self._build_fragment_data(
+            start, end, is_image=is_image, note=note, image_selection=image_selection
+        )
 
         # 1. Petición MVC: Agregar fragmento
         self.signal_req_add_fragment.emit(code_name, self.current_doc, fragment_data)
 
         # 2. Dibujarlo localmente
         color_hex = self.codes_dict[code_name].get("hexcolor", "#fff59d")
+        self._display_fragment_immediately(fragment_data, color_hex)
+
+    def _build_fragment_data(self, start, end, is_image=False, note=None, image_selection=None):
+        """Construye un fragmento de texto, zona de imagen o imagen completa."""
+        if not is_image:
+            return {"type": "text", "start": start, "end": end}
+
+        selection = image_selection or {}
+        image_size = selection.get("image_size") or self.image_viewer.image_size()
+        rect = selection.get("rect")
+        if rect is None and image_size:
+            rect = {
+                "x": 0,
+                "y": 0,
+                "w": image_size.get("w", 0),
+                "h": image_size.get("h", 0),
+            }
+        return {
+            "type": "image",
+            "rect": rect,
+            "image_size": image_size,
+            "note": note,
+        }
+
+    def _display_fragment_immediately(self, fragment_data, color_hex):
+        """Incorpora un fragmento al estado visual y lo muestra sin recargar el documento."""
         fragment_visual = fragment_data.copy()
         fragment_visual["color"] = color_hex
         fragment_visual["document"] = self.current_doc
-        if is_image:
-            self.highlighted.append(fragment_visual)
-            self.restore_highlights()
-        else:
-            self.highlight_fragment(fragment_visual, QColor(color_hex))
+        self.highlighted.append(fragment_visual)
+        self.restore_highlights()
+
+        if fragment_visual.get("type") != "image":
+            cursor = self.text_area.textCursor()
+            cursor.clearSelection()
+            self.text_area.setTextCursor(cursor)
+            self.text_area.viewport().update()
 
     def highlight_fragment(self, fragment, color=None):
         """Resalta un fragmento solo en su documento correspondiente."""
