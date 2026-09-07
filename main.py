@@ -30,6 +30,7 @@ class RaizQA:
         self.ventana.signal_req_delete_code.connect(self.logica.req_delete_code)
         self.ventana.signal_req_update_code.connect(self.logica.req_update_code)
         self.ventana.signal_req_add_fragment.connect(self.logica.req_add_fragment)
+        self.ventana.signal_req_delete_fragment.connect(self.logica.req_delete_fragment)
         self.ventana.signal_req_set_project.connect(self.logica.req_set_project)
         self.ventana.signal_req_update_document.connect(self.logica.req_update_document)
         self.ventana.signal_req_save_all.connect(self.logica.req_save_all)
@@ -39,6 +40,7 @@ class RaizQA:
         self.ventana.signal_req_delete_code.connect(self.ventana.mark_as_dirty)
         self.ventana.signal_req_update_code.connect(self.ventana.mark_as_dirty)
         self.ventana.signal_req_add_fragment.connect(self.ventana.mark_as_dirty)
+        self.ventana.signal_req_delete_fragment.connect(self.ventana.mark_as_dirty)
         self.ventana.signal_req_update_document.connect(self.ventana.mark_as_dirty)
 
         # 2. Backend -> UI (La lógica emite resultados, la ventana los muestra)

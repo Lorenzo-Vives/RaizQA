@@ -13,7 +13,6 @@ a = Analysis(
     datas=collect_data_files('pyspellchecker', includes=['resources/*']) + pyside6_datas + spellchecker_datas + openpyxl_datas + [
         ('gui', 'gui'),
         ('core', 'core'),
-        ('code_viewer', 'code_viewer'),
         ('logo1.ico', '.'),
     ],
     hiddenimports=pyside6_hiddenimports + spellchecker_hiddenimports + openpyxl_hiddenimports,

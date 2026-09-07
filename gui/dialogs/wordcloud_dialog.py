@@ -10,12 +10,59 @@ from PySide6.QtWidgets import (
     QComboBox,
     QPushButton,
     QSpinBox,
+    QStyle,
+    QStyleOptionSpinBox,
     QGraphicsView,
     QGraphicsScene,
     QGraphicsSimpleTextItem,
 )
-from PySide6.QtGui import QFont, QColor, QPainter, QFontMetrics
-from PySide6.QtCore import QRectF, QPointF, QSizeF, Qt
+from PySide6.QtGui import QFont, QColor, QPainter, QFontMetrics, QPalette, QPen, QPolygon
+from PySide6.QtCore import QRectF, QPoint, QPointF, QSizeF, Qt
+
+
+class ReadableArrowSpinBox(QSpinBox):
+    """QSpinBox whose native buttons keep clear, theme-aware chevrons."""
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+
+        option = QStyleOptionSpinBox()
+        self.initStyleOption(option)
+        palette = self.palette()
+        color_group = QPalette.Active if self.isEnabled() else QPalette.Disabled
+        button_color = palette.color(color_group, QPalette.Button)
+        arrow_color = palette.color(color_group, QPalette.ButtonText)
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setPen(QPen(arrow_color, 1.6, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+
+        for subcontrol, points_up in (
+            (QStyle.SC_SpinBoxUp, True),
+            (QStyle.SC_SpinBoxDown, False),
+        ):
+            rect = self.style().subControlRect(QStyle.CC_SpinBox, option, subcontrol, self)
+            if not rect.isValid():
+                continue
+
+            # Cover only the platform arrow glyph, retaining the native button borders.
+            painter.fillRect(rect.adjusted(2, 2, -2, -2), button_color)
+            center = rect.center()
+            half_width = max(3, min(5, rect.width() // 4))
+            height = max(2, min(4, rect.height() // 4))
+            if points_up:
+                points = QPolygon([
+                    QPoint(center.x() - half_width, center.y() + height // 2),
+                    QPoint(center.x(), center.y() - height),
+                    QPoint(center.x() + half_width, center.y() + height // 2),
+                ])
+            else:
+                points = QPolygon([
+                    QPoint(center.x() - half_width, center.y() - height // 2),
+                    QPoint(center.x(), center.y() + height),
+                    QPoint(center.x() + half_width, center.y() - height // 2),
+                ])
+            painter.drawPolyline(points)
 
 
 class WordCloudDialog(QDialog):
@@ -71,7 +118,7 @@ class WordCloudDialog(QDialog):
         filters.addWidget(self.cbo_doc)
 
         filters.addWidget(QLabel("Mínimo letras:"))
-        self.spin_min_len = QSpinBox()
+        self.spin_min_len = ReadableArrowSpinBox()
         self.spin_min_len.setRange(2, 12)
         self.spin_min_len.setValue(3)
         filters.addWidget(self.spin_min_len)

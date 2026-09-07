@@ -33,6 +33,19 @@ class ThemeTreeWidget(QTreeWidget):
         self.setDefaultDropAction(Qt.MoveAction)
         self.setDragDropMode(QAbstractItemView.DragDrop)
 
+    def dragEnterEvent(self, event):
+        if isinstance(event.source(), (QListWidget, ThemeTreeWidget)):
+            event.acceptProposedAction()
+            return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):
+        target = self.itemAt(event.position().toPoint() if hasattr(event, "position") else event.pos())
+        if isinstance(event.source(), (QListWidget, ThemeTreeWidget)) and self.dialog._theme_item_from_item(target):
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
     def dropEvent(self, event):
         if self.dialog.handle_theme_drop(event):
             return
@@ -47,6 +60,7 @@ class ThemesCategoriesDialog(QDialog):
         self._updating = False
         self.codes = list(codes or [])
         self.themes = {}
+        self.theme_memos = {}
         self.theme_order = []
         self._load_themes(themes)
         self._build_ui()
@@ -55,11 +69,12 @@ class ThemesCategoriesDialog(QDialog):
     def _load_themes(self, themes):
         for item in themes or []:
             name = (item or {}).get("name")
-            if not name:
+            if not name or name in self.themes:
                 continue
             codes = (item or {}).get("codes") or []
-            valid_codes = [c for c in codes if c in self.codes]
+            valid_codes = list(dict.fromkeys(c for c in codes if c in self.codes))
             self.themes[name] = set(valid_codes)
+            self.theme_memos[name] = (item or {}).get("memo", "") or ""
             self.theme_order.append(name)
 
     def _build_ui(self):
@@ -97,7 +112,11 @@ class ThemesCategoriesDialog(QDialog):
         self.code_list = QListWidget()
         self.code_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.code_list.setDragEnabled(True)
+        self.code_list.itemDoubleClicked.connect(self._add_code_by_double_click)
         right.addWidget(self.code_list, 1)
+        self.btn_add_code = QPushButton("Agregar al tema")
+        self.btn_add_code.clicked.connect(self._add_selected_codes)
+        right.addWidget(self.btn_add_code)
         self.lbl_count = QLabel("")
         right.addWidget(self.lbl_count)
 
@@ -201,6 +220,7 @@ class ThemesCategoriesDialog(QDialog):
             QMessageBox.warning(self, "Tema existente", "Ya existe un tema con ese nombre.")
             return
         self.themes[name] = set()
+        self.theme_memos[name] = ""
         self.theme_order.append(name)
         theme_item = self._add_theme_item(name)
         theme_item.setExpanded(True)
@@ -223,6 +243,7 @@ class ThemesCategoriesDialog(QDialog):
             QMessageBox.warning(self, "Tema existente", "Ya existe un tema con ese nombre.")
             return
         self.themes[new_name] = self.themes.pop(old_name, set())
+        self.theme_memos[new_name] = self.theme_memos.pop(old_name, "")
         index = self.theme_order.index(old_name)
         self.theme_order[index] = new_name
         theme_item.setText(0, new_name)
@@ -244,6 +265,7 @@ class ThemesCategoriesDialog(QDialog):
         if confirm != QMessageBox.Yes:
             return
         self.themes.pop(name, None)
+        self.theme_memos.pop(name, None)
         if name in self.theme_order:
             self.theme_order.remove(name)
         idx = self.theme_tree.indexOfTopLevelItem(theme_item)
@@ -268,6 +290,37 @@ class ThemesCategoriesDialog(QDialog):
         else:
             pos = event.pos()
         return self.theme_tree.itemAt(pos)
+
+    def _assign_codes_to_theme(self, theme_item, code_names):
+        """Single assignment path used by buttons, double click and drag/drop."""
+        if not theme_item:
+            return False
+        theme_name = theme_item.text(0)
+        self.themes.setdefault(theme_name, set())
+        changed = False
+        for code_name in code_names:
+            if code_name not in self.codes or code_name in self.themes[theme_name]:
+                continue
+            self.themes[theme_name].add(code_name)
+            self._add_code_item(theme_item, code_name)
+            changed = True
+        theme_item.setExpanded(True)
+        self._update_count(theme_item)
+        return changed
+
+    def _add_selected_codes(self):
+        theme_item = self._theme_item_from_item(self.theme_tree.currentItem())
+        if not theme_item:
+            QMessageBox.information(self, "Agregar codigo", "Selecciona primero un tema o categoria.")
+            return
+        self._assign_codes_to_theme(theme_item, [item.text() for item in self.code_list.selectedItems()])
+
+    def _add_code_by_double_click(self, item):
+        theme_item = self._theme_item_from_item(self.theme_tree.currentItem())
+        if not theme_item:
+            QMessageBox.information(self, "Agregar codigo", "Selecciona primero un tema o categoria.")
+            return
+        self._assign_codes_to_theme(theme_item, [item.text()])
 
     def handle_theme_drop(self, event):
         target_item = self._item_at_event(event)
@@ -299,15 +352,7 @@ class ThemesCategoriesDialog(QDialog):
             event.ignore()
             return True
 
-        self.themes.setdefault(theme_name, set())
-        for code_name in moved_codes:
-            if code_name in self.themes[theme_name]:
-                continue
-            self.themes[theme_name].add(code_name)
-            self._add_code_item(theme_item, code_name)
-
-        theme_item.setExpanded(True)
-        self._update_count(theme_item)
+        self._assign_codes_to_theme(theme_item, moved_codes)
         event.acceptProposedAction()
         return True
 
@@ -316,5 +361,5 @@ class ThemesCategoriesDialog(QDialog):
         for name in self.theme_order:
             selected = self.themes.get(name, set())
             ordered = [code for code in self.codes if code in selected]
-            output.append({"name": name, "codes": ordered})
+            output.append({"name": name, "memo": self.theme_memos.get(name, ""), "codes": ordered})
         return output

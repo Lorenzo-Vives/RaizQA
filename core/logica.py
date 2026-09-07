@@ -56,10 +56,10 @@ class ControladorLogico(QObject):
             self.threadpool = QThreadPool.globalInstance()
         self.threadpool.start(worker)
 
-    def req_export_diary(self, diary_text, project_name, export_path):
+    def req_export_diary(self, entries, project_name, export_path):
         """Petición de la UI para exportar el diario."""
         try:
-            ExportManager.export_diary(diary_text, project_name, export_path)
+            ExportManager.export_diary(entries, project_name, export_path)
             self.export_success.emit("Diario", export_path)
         except Exception as e:
             self.export_error.emit("Diario", str(e))
@@ -222,6 +222,12 @@ class ControladorLogico(QObject):
         if not self.current_project: return
         self.current_project.add_fragment(code_name, doc_name, fragment_data)
         self.edds_updated.emit(self.current_project.codes_dict, self.current_project.themes_dict)
+
+    def req_delete_fragment(self, code_name, doc_name, fragment_index):
+        if not self.current_project:
+            return
+        if self.current_project.delete_fragment(code_name, doc_name, fragment_index):
+            self.edds_updated.emit(self.current_project.codes_dict, self.current_project.themes_dict)
 
     def req_update_document(self, doc_name, new_text):
         """Petición de la UI para sobrescribir un documento editado."""

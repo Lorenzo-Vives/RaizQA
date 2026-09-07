@@ -173,11 +173,13 @@ class MergeManager:
                 target_diary.save_diary()
 
                 # Guardar todo en disco
+                # save_project_data normaliza desde themes_dict. No reutilizar
+                # target_state["themes"], porque corresponde al estado anterior
+                # al merge y eliminaría los temas recién incorporados.
                 target_project.save_project_data(
                     documents=target_docs,
                     highlights=target_state.get("highlights", {}),
-                    doc_groups=target_groups,
-                    themes=target_state.get("themes")
+                    doc_groups=target_groups
                 )
                 
                 return True

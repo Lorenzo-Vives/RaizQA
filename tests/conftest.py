@@ -33,6 +33,7 @@ def main_window(qapp, logica):
     window.signal_req_delete_code.connect(logica.req_delete_code)
     window.signal_req_update_code.connect(logica.req_update_code)
     window.signal_req_add_fragment.connect(logica.req_add_fragment)
+    window.signal_req_delete_fragment.connect(logica.req_delete_fragment)
     window.signal_req_update_document.connect(logica.req_update_document)
     window.signal_req_export_project.connect(logica.req_export_project)
     window.signal_req_import_project.connect(logica.req_import_project)

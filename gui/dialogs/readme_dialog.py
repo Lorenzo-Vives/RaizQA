@@ -43,7 +43,7 @@ class ReadmeDialog(QDialog):
         <p>Tu proyecto se guarda automáticamente cada 30 segundos.</p>
 
         <p style='color:gray; font-size:10pt; margin-top:20px;'>
-        Versión 1.6.5 — desarrollado en Python + PySide6 con ayuda de Codex, ChatGPT-5 y Gemini Pro 3.1.
+        Versión piloto 1.2 — desarrollado en Python + PySide6 con ayuda de Codex
         </p>
         """
 

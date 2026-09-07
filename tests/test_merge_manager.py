@@ -115,9 +115,12 @@ def test_merge_themes_rule(tmp_path):
     sin duplicar el tema.
     """
     proj1 = create_mock_project(tmp_path, "Proj1")
+    proj1.add_code("Cod A")
     proj1.add_code_to_theme("Tema 1", "Cod A")
     
     proj2 = create_mock_project(tmp_path, "Proj2")
+    proj2.add_code("Cod B")
+    proj2.add_code("Cod C")
     proj2.add_code_to_theme("Tema 1", "Cod B")
     proj2.add_code_to_theme("Tema 2", "Cod C")
     
@@ -135,3 +138,10 @@ def test_merge_themes_rule(tmp_path):
     tema1_codes = proj1.themes_dict["Tema 1"]["codes"]
     assert "Cod A" in tema1_codes
     assert "Cod B" in tema1_codes
+
+    # El resultado debe sobrevivir al guardado final del merge y a una recarga.
+    reloaded = Project("Proj1", str(tmp_path))
+    reloaded.load_project_data()
+    assert "Tema 2" in reloaded.themes_dict
+    assert reloaded.themes_dict["Tema 1"]["codes"] == ["Cod A", "Cod B"]
+    assert reloaded.themes_dict["Tema 2"]["codes"] == ["Cod C"]

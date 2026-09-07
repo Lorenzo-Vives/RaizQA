@@ -10,6 +10,8 @@ class ExportManager:
     @staticmethod
     def export_diary(entries, project_name, export_path):
         """Exporta el diario estructurado (lista de diccionarios) a un documento Word."""
+        if not isinstance(entries, list) or any(not isinstance(entry, dict) for entry in entries):
+            raise TypeError("Las entradas del diario deben ser una lista de diccionarios.")
         doc = Document()
         doc.add_heading(f"Diario de codificación - {project_name}", level=1)
 
@@ -22,7 +24,7 @@ class ExportManager:
                 try:
                     dt = datetime.fromisoformat(date_str)
                     date_formatted = dt.strftime("%d/%m/%Y a las %H:%M")
-                except ValueError:
+                except (TypeError, ValueError):
                     date_formatted = date_str  # Fallback por si la fecha está corrupta o en otro formato
 
                 author = entry.get("author", "Desconocido")

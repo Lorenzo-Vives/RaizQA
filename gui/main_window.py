@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
     QGridLayout, QDialogButtonBox, QFileIconProvider, QAbstractItemView, QTextEdit,
     QStackedWidget
 )
-from PySide6.QtGui import (QAction, QColor, QTextCursor, QTextCharFormat, QPainter, QPixmap, QIcon, QPalette,
+from PySide6.QtGui import (QAction, QColor, QFont, QTextCursor, QTextCharFormat, QPainter, QPixmap, QIcon, QPalette,
                            QShortcut, QKeySequence)
 from PySide6.QtCore import Qt, QTimer, QPoint, QEvent, Signal
 from docx import Document
@@ -34,13 +34,26 @@ from gui.image_viewer import ImageDocumentViewer
 from gui.dialogs.code_viewer_window import CodeViewerWindow  # Absolute import desde root
 from core.project import Project
 from gui.theme import get_theme
+from gui.utils import hydrate_codes_dict
 
 class RaizQAGUI(QMainWindow):
+    PROJECTION_STYLE = """
+        QWidget { font-size: 16px; }
+        QLabel#TopBrand, QLabel#SearchCount, QLabel#MetaLabel, QLabel#ProjectLabel,
+        QPushButton#TopBarButton, QPushButton#SearchNavButton,
+        QPushButton#WindowButton, QPushButton#WindowButtonClose { font-size: 16px; }
+        QPushButton, QToolButton { min-height: 32px; padding: 8px 14px; }
+        QLineEdit, QTextEdit, QPlainTextEdit, QComboBox, QSpinBox { min-height: 30px; padding: 6px 9px; }
+        QTreeView::item, QListView::item { min-height: 30px; }
+        QHeaderView::section { font-size: 14px; min-height: 28px; padding: 7px; }
+        QMenu::item { font-size: 16px; padding: 10px 30px; }
+        QTabBar::tab { font-size: 16px; min-height: 30px; padding: 7px 14px; }
+    """
     # ==========================================
     # SEÑALES DE LA UI AL BACKEND
     # ==========================================
     signal_req_global_search = Signal(str, object, list, object)
-    signal_req_export_diary = Signal(str, str, str)
+    signal_req_export_diary = Signal(list, str, str)
     signal_req_export_code_tree = Signal(list, str)
     signal_req_export_code_fragments = Signal(list, list, str)
     signal_req_set_project = Signal(object)
@@ -56,6 +69,7 @@ class RaizQAGUI(QMainWindow):
     signal_req_delete_code = Signal(str, bool) # code_name, cascade
     signal_req_update_code = Signal(str, str, str, str)
     signal_req_add_fragment = Signal(str, str, object)
+    signal_req_delete_fragment = Signal(str, str, int)
     signal_req_update_document = Signal(str, str)
     signal_req_save_all = Signal(dict)
     
@@ -109,6 +123,11 @@ class RaizQAGUI(QMainWindow):
         self._codes_expanded = True
         self._image_selection_info = None
 
+        self._projection_mode = False
+        self._projection_geometry = None
+        self._projection_was_maximized = False
+        self._normal_application_font = QFont(QApplication.font())
+
         self.has_unsaved_changes = False
 
         # -------------------- LAYOUT PRINCIPAL --------------------
@@ -141,13 +160,13 @@ class RaizQAGUI(QMainWindow):
         topbar_layout.addWidget(self.lbl_top_brand)
 
         topbar_layout.addSpacing(3)
-        self.btn_menu_file = QPushButton("File")
+        self.btn_menu_file = QPushButton("File ⌄")
         self.btn_menu_file.setObjectName("TopBarButton")
         self.btn_menu_file.setCursor(Qt.PointingHandCursor)
         topbar_layout.addWidget(self.btn_menu_file)
         self._setup_file_menu()
 
-        self.btn_menu_options = QPushButton("Options")
+        self.btn_menu_options = QPushButton("Options ⌄")
         self.btn_menu_options.setObjectName("TopBarButton")
         self.btn_menu_options.setCursor(Qt.PointingHandCursor)
         topbar_layout.addWidget(self.btn_menu_options)
@@ -371,6 +390,7 @@ class RaizQAGUI(QMainWindow):
         tab_bar = QFrame()
         tab_bar.setObjectName("TabBar")
         tab_bar.setFixedHeight(28)
+        self.tab_bar = tab_bar
         tab_bar_layout = QHBoxLayout(tab_bar)
         tab_bar_layout.setContentsMargins(8, 2, 8, 2)
         tab_bar_layout.setSpacing(6)
@@ -477,12 +497,70 @@ class RaizQAGUI(QMainWindow):
         self.action_toggle_theme = QAction(self)
         self.action_toggle_theme.triggered.connect(self.toggle_theme)
         menu.addAction(self.action_toggle_theme)
+        self.action_projection_mode = QAction("Modo proyección", self)
+        self.action_projection_mode.setCheckable(True)
+        self.action_projection_mode.triggered.connect(self.toggle_projection_mode)
+        menu.addAction(self.action_projection_mode)
         self.btn_menu_options.setMenu(menu)
         self.menu_options = menu
 
     def _refresh_options_menu(self):
         if hasattr(self, "action_toggle_theme"):
             self.action_toggle_theme.setText("Modo claro" if self.is_dark_mode else "Modo oscuro")
+        if hasattr(self, "action_projection_mode"):
+            self.action_projection_mode.setChecked(self._projection_mode)
+
+    def toggle_projection_mode(self, enabled=None):
+        enabled = (not self._projection_mode) if enabled is None else bool(enabled)
+        if enabled == self._projection_mode:
+            return
+
+        app = QApplication.instance()
+        if enabled:
+            self._projection_geometry = self.saveGeometry()
+            self._projection_was_maximized = self.isMaximized()
+            if app is not None:
+                self._normal_application_font = QFont(app.font())
+                projection_font = QFont(self._normal_application_font)
+                base_size = projection_font.pointSizeF()
+                projection_font.setPointSizeF((base_size if base_size > 0 else 10.0) + 3.0)
+                app.setFont(projection_font)
+            self._projection_mode = True
+            self.topbar_frame.setFixedHeight(52)
+            self.tab_bar.setFixedHeight(52)
+            self.btn_new_folder.setFixedSize(38, 32)
+            self.code_search_field.setFixedWidth(240)
+            self.btn_toggle_code_expand.setFixedWidth(130)
+            for button in (self.btn_minimize, self.btn_maximize, self.btn_close):
+                button.setFixedSize(38, 32)
+            self.apply_theme()
+            self.showMaximized()
+        else:
+            self._projection_mode = False
+            if app is not None:
+                app.setFont(self._normal_application_font)
+            self.topbar_frame.setFixedHeight(34)
+            self.tab_bar.setFixedHeight(28)
+            self.btn_new_folder.setFixedSize(24, 20)
+            self.code_search_field.setFixedWidth(180)
+            self.btn_toggle_code_expand.setFixedWidth(90)
+            for button in (self.btn_minimize, self.btn_maximize, self.btn_close):
+                button.setFixedSize(24, 20)
+            self.apply_theme()
+            self.showNormal()
+            if self._projection_geometry is not None:
+                self.restoreGeometry(self._projection_geometry)
+            if self._projection_was_maximized:
+                self.showMaximized()
+
+        self._refresh_options_menu()
+
+    def _exec_dialog(self, dialog):
+        """Run a dialog with projection-aware sizing and controls."""
+        if self._projection_mode:
+            dialog.setStyleSheet(f"{dialog.styleSheet()}\n{self.PROJECTION_STYLE}")
+            dialog.setWindowState(dialog.windowState() | Qt.WindowMaximized)
+        return dialog.exec()
 
     def export_project_rqa(self):
         if not self.current_project:
@@ -549,7 +627,7 @@ class RaizQAGUI(QMainWindow):
             
         from gui.dialogs.merge_dialog import MergeDialog
         dialog = MergeDialog(self.current_project.name, imported_name, self)
-        if dialog.exec():
+        if self._exec_dialog(dialog):
             settings = dialog.get_settings()
             self.signal_req_merge_projects.emit(path, settings)
             self.actions_panel.btn_teamwork.setText("⏳ Combinando...")
@@ -558,7 +636,7 @@ class RaizQAGUI(QMainWindow):
 
     def handle_project_merged(self):
         self._close_loading_dialog()
-        self.actions_panel.btn_teamwork.setText("Colaborar 🫂 ▼")
+        self.actions_panel.btn_teamwork.setText("Colaborar 🫂 ⌄")
         self.actions_panel.btn_teamwork.setEnabled(True)
         
         QMessageBox.information(self, "Combinar Proyectos", "Los proyectos se combinaron exitosamente.")
@@ -574,7 +652,7 @@ class RaizQAGUI(QMainWindow):
         self._rebuild_doc_groups_from_tree()
         from gui.dialogs.export_exchange_wizard import ExportExchangeWizard
         wizard = ExportExchangeWizard(self.current_project, self.doc_groups, self.code_themes, self)
-        if wizard.exec():
+        if self._exec_dialog(wizard):
             data = wizard.get_export_data()
             if not data["documents"] and not data["codes"]:
                 QMessageBox.warning(self, "Exportar Archivo", "No se seleccionó ningún dato para exportar.")
@@ -609,7 +687,7 @@ class RaizQAGUI(QMainWindow):
             
         from gui.dialogs.import_exchange_wizard import ImportExchangeWizard
         wizard = ImportExchangeWizard(self.current_project, exchange_data, self)
-        if wizard.exec():
+        if self._exec_dialog(wizard):
             import_data = wizard.get_import_data()
             self.signal_req_import_exchange.emit(path, import_data)
             self.actions_panel.btn_teamwork.setText("⏳ Importando...")
@@ -618,12 +696,12 @@ class RaizQAGUI(QMainWindow):
         
     def handle_project_exported(self, path):
         self._close_loading_dialog()
-        self.actions_panel.btn_teamwork.setText("Colaborar 🫂 ▼")
+        self.actions_panel.btn_teamwork.setText("Colaborar 🫂 ⌄")
         self.actions_panel.btn_teamwork.setEnabled(True)
 
     def handle_project_imported(self, project_path):
         self._close_loading_dialog()
-        self.actions_panel.btn_teamwork.setText("Colaborar 🫂 ▼")
+        self.actions_panel.btn_teamwork.setText("Colaborar 🫂 ⌄")
         self.actions_panel.btn_teamwork.setEnabled(True)
         
         project_name = os.path.basename(project_path)
@@ -824,6 +902,11 @@ class RaizQAGUI(QMainWindow):
             print(f"DEBUG: code {k} -> {v}")
         self.codes_dict = codes_dict
         self.themes_dict = themes_dict
+        if self.current_project:
+            self.current_project.themes_dict = themes_dict
+            self.code_themes = self.current_project.sync_themes(self.code_themes)
+            self.themes_dict = self.current_project.themes_dict
+        self._rebuild_current_highlights()
         # Deferimos la reconstrucción del árbol al siguiente ciclo del event loop
         # para evitar un Segmentation Fault al limpiar la UI desde un handler de señal activo.
         QTimer.singleShot(0, self.populate_code_tree)
@@ -901,7 +984,7 @@ class RaizQAGUI(QMainWindow):
     def handle_error(self, message):
         self._close_loading_dialog()
         if hasattr(self, 'actions_panel') and hasattr(self.actions_panel, 'btn_teamwork') and self.actions_panel.btn_teamwork.text().startswith("⏳"):
-            self.actions_panel.btn_teamwork.setText("Colaborar 🫂 ▼")
+            self.actions_panel.btn_teamwork.setText("Colaborar 🫂 ⌄")
             self.actions_panel.btn_teamwork.setEnabled(True)
         QMessageBox.critical(self, "Error del Backend", message)
 
@@ -943,6 +1026,8 @@ class RaizQAGUI(QMainWindow):
     def apply_theme(self):
         from gui import theme
         theme.apply_theme_to_window(self, self.is_dark_mode)
+        if self._projection_mode:
+            self.setStyleSheet(f"{self.styleSheet()}\n{self.PROJECTION_STYLE}")
 
         current_theme_dict = theme.get_theme(self.is_dark_mode)
         
@@ -1029,7 +1114,7 @@ class RaizQAGUI(QMainWindow):
             return
 
         dialog = MemoDialog(code_name, memo_text)
-        dialog.exec()
+        self._exec_dialog(dialog)
 
     def add_or_edit_memo(self, code_name):
         if not self.memo_manager:
@@ -1037,7 +1122,7 @@ class RaizQAGUI(QMainWindow):
 
         memo_text = self.memo_manager.get_memo(code_name)
         dialog = MemoDialog(code_name, memo_text)
-        if dialog.exec() == QDialog.Accepted:
+        if self._exec_dialog(dialog) == QDialog.Accepted:
             new_text = dialog.get_memo()
             self.memo_manager.add_or_update_memo(code_name, new_text)
             self.update_memo_icon(code_name, has_memo=bool(new_text.strip()))
@@ -1100,7 +1185,7 @@ class RaizQAGUI(QMainWindow):
             return
 
         dialog = DiaryDialog(self.current_project.diary_manager, parent=self)
-        dialog.exec()
+        self._exec_dialog(dialog)
 
     # -------------------- FUNCIONES NUEVAS --------------------
     def _invoke_local_search(self):
@@ -1124,27 +1209,25 @@ class RaizQAGUI(QMainWindow):
 
     def show_code_fragments(self, item, column):
         code_name = self._code_item_name(item)
-        code = self.get_code_data(code_name)
+        code = self.get_hydrated_codes_dict().get(code_name)
         if code and "fragments" in code:
             flat_frags = []
             for doc, frags in code["fragments"].items():
                 # Leer el documento 
-                doc_text = self.current_project.get_document_text(doc) if self.current_project else ""
                 
-                for f in frags:
+                for fragment_index, f in enumerate(frags):
                     f_copy = dict(f)
                     f_copy["document"] = doc
+                    f_copy["_fragment_index"] = fragment_index
                     f_copy["type"] = f.get("type", "text")
                     
                     # INYECTAR EL TEXTO AQUÍ
-                    if "text" not in f_copy:
-                        start, end = f_copy.get("start", 0), f_copy.get("end", 0)
-                        f_copy["text"] = doc_text[start:end]
                         
                     flat_frags.append(f_copy)
                     
-            dialog = CodeFragmentsDialog(code_name, flat_frags)
-            dialog.exec()
+            dialog = CodeFragmentsDialog(code_name, flat_frags, parent=self)
+            dialog.fragment_delete_requested.connect(self.signal_req_delete_fragment.emit)
+            self._exec_dialog(dialog)
 
     def _on_code_tree_item_clicked(self, item, column):
         if column == 2:
@@ -1368,7 +1451,7 @@ class RaizQAGUI(QMainWindow):
     def handle_export_error(self, export_type, error_msg):
         self._close_loading_dialog()
         if export_type == "Proyecto .rqa":
-            self.actions_panel.btn_teamwork.setText("Teamwork 🫂 ▼")
+            self.actions_panel.btn_teamwork.setText("Teamwork 🫂 ⌄")
             self.actions_panel.btn_teamwork.setEnabled(True)
         QMessageBox.critical(self, f"Exportar {export_type}", f"No se pudo exportar {export_type}:\n{error_msg}")
 
@@ -1886,7 +1969,13 @@ class RaizQAGUI(QMainWindow):
             self.doc_editor_controller.load_document(None, "")
 
         #  3. Restaurar los subrayados del documento nuevo DIRECTAMENTE desde codes_dict
+        self._rebuild_current_highlights()
+
+    def _rebuild_current_highlights(self):
+        """Rebuild the current document's visual fragments from the code EDD."""
         self.highlighted = []
+        if not self.current_doc:
+            return
         for code_name, data in self.codes_dict.items():
             for frag in data.get("fragments", {}).get(self.current_doc, []):
                 f_copy = dict(frag)
@@ -2132,7 +2221,7 @@ class RaizQAGUI(QMainWindow):
         
         # Abrir ventana unificada
         dialog = NewCodeDialog(self.COLOR_PALETTE, default_color=default_color, parent=self)
-        if dialog.exec() != QDialog.Accepted:
+        if self._exec_dialog(dialog) != QDialog.Accepted:
             return
 
         code_label, color_hex, memo = dialog.get_data()
@@ -2171,7 +2260,7 @@ class RaizQAGUI(QMainWindow):
         
         # Abrir ventana unificada (si es "in vivo", code_label ya trae un texto sugerido)
         dialog = NewCodeDialog(self.COLOR_PALETTE, default_name=code_label or "", default_color=default_color, parent=self)
-        if dialog.exec() != QDialog.Accepted:
+        if self._exec_dialog(dialog) != QDialog.Accepted:
             return
 
         code_label, color_hex, memo = dialog.get_data()
@@ -2250,7 +2339,9 @@ class RaizQAGUI(QMainWindow):
         fragment_visual = fragment_data.copy()
         fragment_visual["color"] = color_hex
         fragment_visual["document"] = self.current_doc
-        self.highlighted.append(fragment_visual)
+        key = self._fragment_visual_key(fragment_visual)
+        if not any(self._fragment_visual_key(existing) == key for existing in self.highlighted):
+            self.highlighted.append(fragment_visual)
         self.restore_highlights()
 
         if fragment_visual.get("type") != "image":
@@ -2258,6 +2349,21 @@ class RaizQAGUI(QMainWindow):
             cursor.clearSelection()
             self.text_area.setTextCursor(cursor)
             self.text_area.viewport().update()
+
+    @staticmethod
+    def _fragment_visual_key(fragment):
+        rect = fragment.get("rect") or {}
+        return (
+            fragment.get("document"),
+            fragment.get("type", "text"),
+            fragment.get("start"),
+            fragment.get("end"),
+            rect.get("x"),
+            rect.get("y"),
+            rect.get("w"),
+            rect.get("h"),
+            fragment.get("note"),
+        )
 
     def highlight_fragment(self, fragment, color=None):
         """Resalta un fragmento solo en su documento correspondiente."""
@@ -2366,27 +2472,8 @@ class RaizQAGUI(QMainWindow):
         return None
 
     def get_hydrated_codes_dict(self):
-            """Genera una copia de codes_dict inyectando el texto real de los fragmentos, 
-            para que los módulos externos puedan mostrar el texto sin fallar."""
-            import copy
-            hydrated = copy.deepcopy(self.codes_dict)
-            
-            if not self.current_project:
-                return hydrated
-                
-            for code_name, data in hydrated.items():
-                for doc_name, frags in data.get("fragments", {}).items():
-                    # Cargamos el texto completo del documento (con caché en memoria gracias a project.py)
-                    doc_text = self.current_project.get_document_text(doc_name)
-                    
-                    for frag in frags:
-                        if "text" not in frag:
-                            start = frag.get("start", 0)
-                            end = frag.get("end", 0)
-                            # Cortamos el string y creamos la llave "text" que espera la UI
-                            frag["text"] = doc_text[start:end]
-                            
-            return hydrated
+        """Return a detached, consistently hydrated view of the code EDD."""
+        return hydrate_codes_dict(self.codes_dict, self.current_project)
 
 
     # -------------------- VER CÓDIGOS --------------------
@@ -2410,7 +2497,7 @@ class RaizQAGUI(QMainWindow):
             theme=self._current_theme(),
             dark_mode=self.is_dark_mode,
         )
-        viewer.exec()
+        self._exec_dialog(viewer)
 
     def open_themes_categories(self):
         if not self.current_project:
@@ -2422,8 +2509,9 @@ class RaizQAGUI(QMainWindow):
         codes = [name for name, data in self.codes_dict.items() if data.get("parent") is None]
         
         dialog = ThemesCategoriesDialog(codes, self.code_themes, parent=self)
-        if dialog.exec() == QDialog.Accepted:
-            self.code_themes = dialog.get_themes_data()
+        if self._exec_dialog(dialog) == QDialog.Accepted:
+            self.code_themes = self.current_project.sync_themes(dialog.get_themes_data())
+            self.themes_dict = self.current_project.themes_dict
             self.save_project()
 
             self.populate_code_tree()
@@ -2441,7 +2529,7 @@ class RaizQAGUI(QMainWindow):
         if len(docs) >= 2:
             right = docs[1] if docs[0] == left else docs[0]
         dialog = CompareDialog(self.current_project, self.codes_dict, left_doc=left, right_doc=right, parent=self)
-        dialog.exec()
+        self._exec_dialog(dialog)
 
     def open_code_matrix(self):
         if not self.current_project:
@@ -2455,7 +2543,7 @@ class RaizQAGUI(QMainWindow):
             QMessageBox.information(self, "Code Matrix", "No hay códigos creados aún.")
             return
         dialog = CodeMatrixDialog(docs, self.codes_dict, current_doc=self.current_doc, parent=self)
-        dialog.exec()
+        self._exec_dialog(dialog)
 
     def open_wordcloud_dialog(self):
         if not self.current_project:
@@ -2466,7 +2554,7 @@ class RaizQAGUI(QMainWindow):
             QMessageBox.information(self, "Nube de palabras", "No hay documentos para analizar.")
             return
         dialog = WordCloudDialog(self.current_project, docs, parent=self)
-        dialog.exec()
+        self._exec_dialog(dialog)
 
     def open_themes_analysis(self):
         if not self.current_project:
@@ -2475,8 +2563,10 @@ class RaizQAGUI(QMainWindow):
         if not self.code_themes:
             QMessageBox.information(self, "Analisis de temas", "No hay temas o categorias creadas.")
             return
-        dialog = ThemesAnalysisDialog(self.codes_dict, self.code_themes, self.current_project, parent=self)
-        dialog.exec()
+        dialog = ThemesAnalysisDialog(
+            self.get_hydrated_codes_dict(), self.code_themes, self.current_project, parent=self
+        )
+        self._exec_dialog(dialog)
 
     def open_case_study(self):
         if not self.current_project:
@@ -2491,13 +2581,13 @@ class RaizQAGUI(QMainWindow):
             return
         dialog = CaseStudyDialog(
             self.current_project,
-            self.codes_dict,
+            self.get_hydrated_codes_dict(),
             docs,
             self.case_studies,
             self.doc_groups,
             parent=self,
         )
-        dialog.exec()
+        self._exec_dialog(dialog)
         if dialog.updated:
             self.case_studies = dialog.get_case_studies()
             self.save_project()
@@ -2531,7 +2621,7 @@ class RaizQAGUI(QMainWindow):
             return
 
         dialog = ExportCodeSelectionDialog(rows, parent=self)
-        if dialog.exec() != QDialog.Accepted:
+        if self._exec_dialog(dialog) != QDialog.Accepted:
             return
 
         selected_names = dialog.selected_code_names()
@@ -2717,7 +2807,7 @@ class RaizQAGUI(QMainWindow):
 
     def ask_color_from_palette(self, suggested):
         dialog = ColorPickerDialog(self.COLOR_PALETTE, suggested, self)
-        if dialog.exec() == QDialog.Accepted and dialog.selected_color:
+        if self._exec_dialog(dialog) == QDialog.Accepted and dialog.selected_color:
             return dialog.selected_color
         return suggested
 

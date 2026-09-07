@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 
 from gui.dialogs.code_viewer_window import CodeViewerWindow
 from gui.dialogs.case_setup_dialog import CaseSetupDialog
+from gui.utils import hydrate_codes_dict
 
 
 class CaseStudyDialog(QDialog):
@@ -23,7 +24,7 @@ class CaseStudyDialog(QDialog):
         self.setWindowTitle("Estudio de casos")
         self.resize(860, 520)
         self.project = project
-        self.codes_dict = codes_dict or {}
+        self.codes_dict = hydrate_codes_dict(codes_dict, project)
         self.documents = documents or []
         self.doc_groups = doc_groups or {}
         self.case_studies = case_studies or []
@@ -268,11 +269,15 @@ class CaseStudyDialog(QDialog):
             dark_mode=dark_mode,
         )
         viewer.select_fragment(code_name, frag)
-        viewer.exec()
+        runner = getattr(self.parent(), "_exec_dialog", None)
+        runner(viewer) if runner else viewer.exec()
 
     def _open_case_setup(self):
         dialog = CaseSetupDialog(self.documents, self.doc_groups, self.case_studies, parent=self)
-        if dialog.exec() != QDialog.Accepted:
+        root = self.parent()
+        runner = getattr(root, "_exec_dialog", None)
+        result = runner(dialog) if runner else dialog.exec()
+        if result != QDialog.Accepted:
             return False
         self.case_studies = dialog.get_case_studies()
         self.updated = True

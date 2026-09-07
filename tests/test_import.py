@@ -24,10 +24,11 @@ def test_import_docx(temp_project, tmp_path):
     
     filename, text = temp_project.import_document(str(docx_file))
     
-    # EXPECTATIVA OBJETIVA: El nombre del archivo debe conservar su extensión o reflejar el archivo original.
-    assert filename == "test.docx"
+    # Los documentos editables se normalizan a texto plano dentro del proyecto.
+    assert filename == "test.txt"
     assert "Contenido de prueba DOCX" in text
     assert filename in temp_project.texts_dict
+    assert temp_project.texts_dict[filename] == text
 
 def test_import_unsupported_format(temp_project, tmp_path):
     """Prueba importar un formato no soportado (ej. .xyz)."""

@@ -46,7 +46,8 @@ def test_delete_purges_fragments(temp_project):
     
     # Verificar que los fragmentos de ese documento fueron purgados
     fragments = temp_project.codes_dict.get("CodigoPrueba", {}).get("fragments", {})
-    assert doc_name not in fragments or len(fragments[doc_name]) == 0
+    assert doc_name not in fragments
+    assert doc_name not in temp_project.texts_dict
 
 def test_delete_document(temp_project):
     """Prueba que el documento se elimine del disco y metadatos."""

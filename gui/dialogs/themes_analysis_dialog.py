@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
 )
 
 from gui.dialogs.code_viewer_window import CodeViewerWindow
+from gui.utils import hydrate_codes_dict
 
 
 class ThemesAnalysisDialog(QDialog):
@@ -19,7 +20,7 @@ class ThemesAnalysisDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Analisis de temas")
         self.resize(720, 420)
-        self.codes_dict = codes_dict or {}
+        self.codes_dict = hydrate_codes_dict(codes_dict, project)
         self.themes = themes or []
         self.project = project
         self._build_ui()
@@ -65,7 +66,7 @@ class ThemesAnalysisDialog(QDialog):
                     f_copy = dict(f)
                     f_copy["document"] = doc
                     f_copy["color"] = data.get("hexcolor", "#fff59d")
-                    f_copy["type"] = "text"
+                    f_copy["type"] = f.get("type", "text")
                     flat_frags.append(f_copy)
             frags[code_name] = flat_frags
         return frags
@@ -133,4 +134,5 @@ class ThemesAnalysisDialog(QDialog):
             dark_mode=dark_mode,
         )
         viewer.select_fragment(code_name, frag)
-        viewer.exec()
+        runner = getattr(self.parent(), "_exec_dialog", None)
+        runner(viewer) if runner else viewer.exec()

@@ -162,6 +162,14 @@ QPushButton {{
     padding: 8px 12px;
     border-radius: 8px;
 }}
+/* Los botones con QMenu ya muestran un chevron en su texto. Ocultamos el
+   indicador nativo de Windows, que se dibuja como un triángulo sólido y
+   provocaba una segunda flecha de gran tamaño. */
+QPushButton::menu-indicator {{
+    image: none;
+    width: 0px;
+    height: 0px;
+}}
 QPushButton[actionButton="true"] {{
     font-weight: 600;
     text-align: left;

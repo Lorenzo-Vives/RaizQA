@@ -51,18 +51,18 @@ class Project:
 
     def save_project_data(self, documents, highlights, doc_groups=None, themes=None, case_studies=None):
         """Persiste todo el estado (EDDs y metadatos) en un único archivo atómico."""
+        normalized_themes = self.sync_themes(themes)
         data = {
             "documents": documents,
             "highlights": highlights,
             "codes_dict": self.codes_dict,
             "themes_dict": self.themes_dict,
+            "themes": normalized_themes,
             "memos_dict": self.memos_dict,
         }
         if doc_groups is not None:
             data["doc_groups"] = doc_groups
             self.sync_doc_groups_to_fs(doc_groups)
-        if themes is not None:
-            data["themes"] = themes
         if case_studies is not None:
             data["case_studies"] = case_studies
             
@@ -107,6 +107,10 @@ class Project:
                         
         self.codes_dict = data.get("codes_dict", {})
         self.themes_dict = data.get("themes_dict", {})
+        legacy_themes = data.get("themes") if "themes" in data else None
+        if not legacy_themes and self.themes_dict:
+            legacy_themes = None
+        data["themes"] = self.sync_themes(legacy_themes)
         self.memos_dict = data.get("memos_dict", {})
         
         # Migración: Asegurar que los códigos tengan la estructura de árbol (parent/children)
@@ -245,6 +249,9 @@ class Project:
 
         if ext in self.TEXT_EXTENSIONS:
             self._write_text(dest_path, text)
+            # Mantener la lectura en memoria alineada con el archivo recién
+            # importado, incluso si reemplaza un nombre ya conocido.
+            self.texts_dict[dest_name] = text
         self._register_document(dest_name)
         return dest_name, text
 
@@ -262,7 +269,7 @@ class Project:
                 json.dump(meta, f, indent=4, ensure_ascii=False)
 
     def delete_document(self, document_name):
-        """Elimina el archivo y lo quita del metadata."""
+        """Elimina el archivo y purga todas sus referencias del proyecto."""
         doc_path = self.get_document_path(document_name)
         if os.path.exists(doc_path):
             try:
@@ -279,6 +286,12 @@ class Project:
                         json.dump(meta, f, indent=4, ensure_ascii=False)
             except Exception:
                 pass
+
+        self.texts_dict.pop(document_name, None)
+        for code_data in self.codes_dict.values():
+            fragments = code_data.get("fragments", {})
+            if isinstance(fragments, dict):
+                fragments.pop(document_name, None)
 
     def list_documents(self):
         """Devuelve los documentos almacenados en la carpeta del proyecto."""
@@ -448,6 +461,26 @@ class Project:
         fragments_doc = self.codes_dict[code_name]["fragments"].setdefault(doc_name, [])
         fragments_doc.append(fragment_data)
 
+    def delete_fragment(self, code_name, doc_name, fragment_index):
+        """Delete one coded fragment identified by code, document and list index."""
+        code_data = self.codes_dict.get(code_name)
+        if not code_data:
+            return False
+        document_fragments = code_data.get("fragments", {}).get(doc_name)
+        if not isinstance(document_fragments, list):
+            return False
+        if (
+            not isinstance(fragment_index, int)
+            or isinstance(fragment_index, bool)
+            or not 0 <= fragment_index < len(document_fragments)
+        ):
+            return False
+
+        document_fragments.pop(fragment_index)
+        if not document_fragments:
+            code_data.get("fragments", {}).pop(doc_name, None)
+        return True
+
     def get_fragments_for_code(self, code_name):
         """
         Recupera el texto real de forma instantánea (O(1)) para todos los fragmentos
@@ -471,6 +504,44 @@ class Project:
         return results
 
     # --- CRUD TEMAS ---
+    def sync_themes(self, themes=None):
+        """Normalize and synchronize the list and dictionary theme formats."""
+        existing = self.themes_dict if isinstance(self.themes_dict, dict) else {}
+        supplied = themes if isinstance(themes, list) else None
+        source = supplied
+        if source is None:
+            source = [
+                {"name": name, "memo": data.get("memo", ""), "codes": data.get("codes", [])}
+                for name, data in existing.items()
+                if isinstance(data, dict)
+            ]
+
+        normalized = []
+        normalized_dict = {}
+        seen_names = set()
+
+        for item in source:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "").strip()
+            if not name or name in seen_names:
+                continue
+            seen_names.add(name)
+            previous = existing.get(name, {}) if isinstance(existing.get(name, {}), dict) else {}
+            memo = item.get("memo")
+            if memo is None or memo == "":
+                memo = previous.get("memo", "")
+            valid_codes = []
+            seen_codes = set()
+            for code_name in item.get("codes", []) or []:
+                if code_name in self.codes_dict and code_name not in seen_codes:
+                    seen_codes.add(code_name)
+                    valid_codes.append(code_name)
+            normalized.append({"name": name, "memo": memo or "", "codes": valid_codes})
+            normalized_dict[name] = {"memo": memo or "", "codes": valid_codes}
+
+        self.themes_dict = normalized_dict
+        return normalized
     def add_theme(self, theme_name, memo=""):
         if theme_name not in self.themes_dict:
             self.themes_dict[theme_name] = {
@@ -508,6 +579,7 @@ class Project:
         doc_path = self.get_document_path(doc_name)
         with open(doc_path, 'w', encoding='utf-8') as f:
             f.write(new_text)
+        self.texts_dict[doc_name] = new_text
 
     def _sync_fragment_indices(self, doc_name, old_text, new_text):
         """

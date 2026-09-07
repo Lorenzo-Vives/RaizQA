@@ -137,7 +137,7 @@ class ActionsPanelWidget(QFrame):
         btn_working_dir = QPushButton("Seleccionar Working Directory")
         
         # --- BOTÓN DESPLEGABLE DE PROYECTO ---
-        self.btn_project = QPushButton("📁 Proyecto ▼")
+        self.btn_project = QPushButton("📁 Proyecto ⌄")
         project_menu = QMenu(self.btn_project)
         
         action_create = QAction("Nuevo proyecto...", self)
@@ -153,7 +153,7 @@ class ActionsPanelWidget(QFrame):
         
         btn_import_doc = QPushButton("Importar Archivo")
         
-        self.btn_teamwork = QPushButton("Colaborar 🫂 ▼")
+        self.btn_teamwork = QPushButton("Colaborar 🫂 ⌄")
         teamwork_menu = QMenu(self.btn_teamwork)
         
         action_merge = QAction("Combinar proyectos...", self)
@@ -189,7 +189,7 @@ class ActionsPanelWidget(QFrame):
         btn_diary = QPushButton("📓 Diario de codificación")
 
         # --- BOTÓN DESPLEGABLE DE EXPORTACIÓN ---
-        btn_export = QPushButton("📤 Exportar ▼")
+        btn_export = QPushButton("📤 Exportar ⌄")
         export_menu = QMenu(btn_export)
 
         action_export_codes = QAction("Libro de códigos", self)
