@@ -4,6 +4,8 @@ import zipfile
 import tempfile
 import json
 
+from core.fragment_utils import merge_unique_fragments
+
 class ImportManager:
     """Gestor dedicado para desempaquetar proyectos en formato .rqa"""
 
@@ -217,10 +219,7 @@ class ImportManager:
                                 target_code_data["fragments"][doc] = []
                                 
                             existing_frags = target_code_data["fragments"][doc]
-                            for new_frag in pkg_fragments[doc]:
-                                is_dup = any(f["start"] == new_frag["start"] and f["end"] == new_frag["end"] for f in existing_frags)
-                                if not is_dup:
-                                    existing_frags.append(new_frag)
+                            merge_unique_fragments(existing_frags, pkg_fragments[doc])
 
             # 5. GUARDAR TODO EN DISCO
             target_project.save_project_data(

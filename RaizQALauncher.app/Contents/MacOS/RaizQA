@@ -23,8 +23,17 @@ alert_and_exit() {
     exit 1
 }
 
+python_is_compatible() {
+    local candidate="$1"
+
+    [[ -x "$candidate" ]] && \
+        "$candidate" -c \
+            'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' \
+            >/dev/null 2>&1
+}
+
 pick_python() {
-    if [[ -n "${RAIZQA_PYTHON:-}" && -x "${RAIZQA_PYTHON:-}" ]]; then
+    if [[ -n "${RAIZQA_PYTHON:-}" ]] && python_is_compatible "$RAIZQA_PYTHON"; then
         printf '%s' "$RAIZQA_PYTHON"
         return 0
     fi
@@ -35,15 +44,18 @@ pick_python() {
         "/usr/local/bin/python3" \
         "/Library/Frameworks/Python.framework/Versions/Current/bin/python3"
     do
-        if [[ -x "$candidate" ]]; then
+        if python_is_compatible "$candidate"; then
             printf '%s' "$candidate"
             return 0
         fi
     done
 
     if command -v python3 >/dev/null 2>&1; then
-        command -v python3
-        return 0
+        candidate="$(command -v python3)"
+        if python_is_compatible "$candidate"; then
+            printf '%s' "$candidate"
+            return 0
+        fi
     fi
 
     return 1
@@ -55,21 +67,37 @@ fi
 
 PYTHON_BIN="$(pick_python || true)"
 if [[ -z "$PYTHON_BIN" ]]; then
-    alert_and_exit "No se encontró Python 3. Instala Python 3 y vuelve a abrir RaizQA."
+    alert_and_exit "No se encontró Python 3.10 o superior. Ejecuta nuevamente el instalador de RaizQA."
 fi
 PYTHON_VERSION="$("$PYTHON_BIN" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
-
-if ! "$PYTHON_BIN" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)'; then
-    alert_and_exit "RaizQA requiere Python 3.10 o superior. Se encontró Python $PYTHON_VERSION."
-fi
 
 log "Iniciando RaizQA desde $PROJECT_ROOT"
 log "Python: $PYTHON_BIN"
 log "Versión de Python: $PYTHON_VERSION"
 
-if [[ ! -x "$VENV_DIR/bin/python" ]]; then
+VENV_IS_COMPATIBLE=false
+if python_is_compatible "$VENV_DIR/bin/python"; then
+    VENV_IS_COMPATIBLE=true
+fi
+
+if [[ "$VENV_IS_COMPATIBLE" != true ]]; then
+    if [[ -e "$VENV_DIR" ]]; then
+        log "El entorno virtual existente es incompatible o está dañado; se reconstruirá"
+        VENV_OPTION="--clear"
+    else
+        VENV_OPTION=""
+    fi
+
     log "Creando entorno virtual en $VENV_DIR"
-    "$PYTHON_BIN" -m venv "$VENV_DIR" >> "$LOG_FILE" 2>&1 || alert_and_exit "No se pudo crear el entorno virtual. Revisa el registro."
+    if [[ -n "$VENV_OPTION" ]]; then
+        "$PYTHON_BIN" -m venv "$VENV_OPTION" "$VENV_DIR" \
+            >> "$LOG_FILE" 2>&1 \
+            || alert_and_exit "No se pudo reconstruir el entorno virtual. Revisa el registro."
+    else
+        "$PYTHON_BIN" -m venv "$VENV_DIR" \
+            >> "$LOG_FILE" 2>&1 \
+            || alert_and_exit "No se pudo crear el entorno virtual. Revisa el registro."
+    fi
 fi
 
 if [[ ! -f "$REQUIREMENTS_FILE" ]]; then

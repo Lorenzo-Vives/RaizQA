@@ -13,6 +13,94 @@ echo ""
 # Carpeta segura donde se instalará (fuera de Documentos para evitar bloqueos TCC)
 INSTALL_DIR="$HOME/RaizQA"
 
+python_is_compatible() {
+    local candidate="$1"
+
+    [ -x "$candidate" ] && \
+        "$candidate" -c \
+            'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' \
+            >/dev/null 2>&1
+}
+
+find_compatible_python() {
+    local candidate
+
+    for candidate in \
+        "/opt/homebrew/bin/python3" \
+        "/usr/local/bin/python3" \
+        "/Library/Frameworks/Python.framework/Versions/Current/bin/python3"
+    do
+        if python_is_compatible "$candidate"; then
+            printf '%s' "$candidate"
+            return 0
+        fi
+    done
+
+    if command -v python3 >/dev/null 2>&1; then
+        candidate="$(command -v python3)"
+        if python_is_compatible "$candidate"; then
+            printf '%s' "$candidate"
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
+find_homebrew() {
+    local candidate
+
+    for candidate in "/opt/homebrew/bin/brew" "/usr/local/bin/brew"; do
+        if [ -x "$candidate" ]; then
+            printf '%s' "$candidate"
+            return 0
+        fi
+    done
+
+    if command -v brew >/dev/null 2>&1; then
+        command -v brew
+        return 0
+    fi
+
+    return 1
+}
+
+# Buscar primero un Python ya instalado. Si no hay uno compatible, instalarlo
+# mediante Homebrew. Se usan rutas absolutas porque las aplicaciones abiertas
+# desde Finder no siempre heredan el PATH configurado en la Terminal.
+PYTHON_BIN="$(find_compatible_python || true)"
+
+if [ -z "$PYTHON_BIN" ]; then
+    HOMEBREW_BIN="$(find_homebrew || true)"
+
+    if [ -z "$HOMEBREW_BIN" ]; then
+        echo "RaizQA necesita Python 3.10 o superior."
+        echo ""
+        echo "No se encontró Homebrew, que se utiliza para instalar Python."
+        echo "Copia y pega este comando en la Terminal:"
+        echo ""
+        echo '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
+        echo ""
+        echo "Cuando termine, vuelve a ejecutar el instalador de RaizQA."
+        exit 1
+    fi
+
+    echo -e "${GREEN}[+] Instalando una versión compatible de Python...${NC}"
+    "$HOMEBREW_BIN" install python
+
+    HOMEBREW_PREFIX="$("$HOMEBREW_BIN" --prefix)"
+    PYTHON_BIN="$HOMEBREW_PREFIX/bin/python3"
+
+    if ! python_is_compatible "$PYTHON_BIN"; then
+        echo "Error: Homebrew no pudo proporcionar Python 3.10 o superior."
+        echo "Actualiza Homebrew con 'brew update' y vuelve a intentarlo."
+        exit 1
+    fi
+fi
+
+PYTHON_VERSION="$("$PYTHON_BIN" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")')"
+echo -e "${GREEN}[+] Python compatible encontrado: $PYTHON_VERSION${NC}"
+
 # Verificar que Git esté instalado
 if ! command -v git >/dev/null 2>&1; then
     echo "No se encontró Git en el sistema."
@@ -75,7 +163,7 @@ ln -sfn \
 # 4. Iniciar la aplicación
 echo -e "${GREEN}[+] ¡Todo listo! Iniciando RaizQA...${NC}"
 echo -e "La primera vez puede tardar unos segundos mientras instala los componentes necesarios."
-open "$INSTALL_DIR/RaizQALauncher.app"
+RAIZQA_PYTHON="$PYTHON_BIN" open "$INSTALL_DIR/RaizQALauncher.app"
 
 echo ""
 echo -e "${BLUE}=======================================${NC}"

@@ -109,6 +109,156 @@ def test_merge_fragments_rule(tmp_path):
     assert 0 in starts
     assert 6 in starts
 
+
+def test_merge_image_fragments_without_start_or_end(tmp_path):
+    """Las zonas de imagen se fusionan y deduplican sin requerir índices de texto."""
+    proj1 = create_mock_project(tmp_path, "Proj1")
+    proj1.add_code("Visual", "#ff0000", "")
+    duplicate = {
+        "type": "image",
+        "rect": {"x": 10, "y": 20, "w": 100, "h": 80},
+        "image_size": {"w": 800, "h": 600},
+        "note": "Zona compartida",
+    }
+    proj1.add_fragment("Visual", "doc1.txt", duplicate)
+
+    proj2 = create_mock_project(tmp_path, "Proj2")
+    proj2.add_code("Visual", "#00ff00", "")
+    proj2.add_fragment("Visual", "doc1.txt", dict(duplicate))
+    proj2.add_fragment("Visual", "doc1.txt", {
+        "type": "image",
+        "rect": {"x": 200, "y": 220, "w": 50, "h": 40},
+        "image_size": {"w": 800, "h": 600},
+        "note": "Zona nueva",
+    })
+
+    proj1.save_project_data(["doc1.txt"], {})
+    proj2.save_project_data(["doc1.txt"], {})
+    rqa_path = str(tmp_path / "proj2_images.rqa")
+    ExportManager.export_project_to_rqa(str(tmp_path / "Proj2"), rqa_path)
+
+    assert MergeManager.merge_projects(proj1, rqa_path, {}) is True
+
+    fragments = proj1.codes_dict["Visual"]["fragments"]["doc1.txt"]
+    assert len(fragments) == 2
+    assert {fragment["note"] for fragment in fragments} == {"Zona compartida", "Zona nueva"}
+
+
+def test_merge_legacy_fragment_without_positions(tmp_path):
+    """Un fragmento antiguo incompleto no debe interrumpir la combinación."""
+    proj1 = create_mock_project(tmp_path, "Proj1")
+    proj1.add_code("Legado")
+    proj1.add_fragment("Legado", "doc1.txt", {"text": "sin posiciones"})
+
+    proj2 = create_mock_project(tmp_path, "Proj2")
+    proj2.add_code("Legado")
+    proj2.add_fragment("Legado", "doc1.txt", {"text": "sin posiciones"})
+    proj2.add_fragment("Legado", "doc1.txt", {"text": "otro fragmento"})
+
+    proj1.save_project_data(["doc1.txt"], {})
+    proj2.save_project_data(["doc1.txt"], {})
+    rqa_path = str(tmp_path / "proj2_legacy.rqa")
+    ExportManager.export_project_to_rqa(str(tmp_path / "Proj2"), rqa_path)
+
+    MergeManager.merge_projects(proj1, rqa_path, {})
+
+    fragments = proj1.codes_dict["Legado"]["fragments"]["doc1.txt"]
+    assert fragments == [{"text": "sin posiciones"}, {"text": "otro fragmento"}]
+
+
+def test_merge_preserves_deep_code_hierarchy(tmp_path):
+    """Los códigos importados conservan padres e hijos de cualquier profundidad."""
+    proj1 = create_mock_project(tmp_path, "Proj1")
+    proj1.add_code("Código local")
+
+    proj2 = create_mock_project(tmp_path, "Proj2")
+    parent = None
+    for level in range(1, 6):
+        code_name = f"Importado {level}"
+        proj2.add_code(code_name, parent_name=parent)
+        parent = code_name
+
+    proj1.save_project_data(["doc1.txt"], {})
+    proj2.save_project_data(["doc1.txt"], {})
+    rqa_path = str(tmp_path / "proj2_hierarchy.rqa")
+    ExportManager.export_project_to_rqa(str(tmp_path / "Proj2"), rqa_path)
+
+    MergeManager.merge_projects(proj1, rqa_path, {})
+
+    reloaded = Project("Proj1", str(tmp_path))
+    reloaded.load_project_data()
+    assert reloaded.codes_dict["Importado 1"]["parent"] is None
+    for level in range(2, 6):
+        name = f"Importado {level}"
+        parent_name = f"Importado {level - 1}"
+        assert reloaded.codes_dict[name]["parent"] == parent_name
+        assert reloaded.codes_dict[parent_name]["children"] == [name]
+
+
+def test_merge_keeps_open_project_hierarchy_on_name_conflict(tmp_path):
+    """Un código existente conserva su padre aunque el importado use otro."""
+    proj1 = create_mock_project(tmp_path, "Proj1")
+    proj1.add_code("Padre local")
+    proj1.add_code("Compartido", parent_name="Padre local")
+
+    proj2 = create_mock_project(tmp_path, "Proj2")
+    proj2.add_code("Padre importado")
+    proj2.add_code("Compartido", parent_name="Padre importado")
+    proj2.add_code("Descendiente nuevo", parent_name="Compartido")
+
+    proj1.save_project_data(["doc1.txt"], {})
+    proj2.save_project_data(["doc1.txt"], {})
+    rqa_path = str(tmp_path / "proj2_conflict.rqa")
+    ExportManager.export_project_to_rqa(str(tmp_path / "Proj2"), rqa_path)
+
+    MergeManager.merge_projects(proj1, rqa_path, {})
+
+    assert proj1.codes_dict["Compartido"]["parent"] == "Padre local"
+    assert proj1.codes_dict["Padre local"]["children"] == ["Compartido"]
+    assert proj1.codes_dict["Descendiente nuevo"]["parent"] == "Compartido"
+    assert proj1.codes_dict["Compartido"]["children"] == ["Descendiente nuevo"]
+
+
+def test_merge_rolls_back_document_copies_on_failure(tmp_path, monkeypatch):
+    """Una copia fallida no deja documentos ni metadata parcialmente importados."""
+    import core.merge_manager as merge_manager_module
+
+    proj1 = create_mock_project(tmp_path, "Proj1")
+    proj1.add_code("Local")
+    proj1.save_project_data(["doc1.txt"], {}, doc_groups={"__root__": ["doc1.txt"]})
+
+    proj2 = create_mock_project(tmp_path, "Proj2")
+    for doc_name in ("doc2.txt", "doc3.txt"):
+        with open(os.path.join(proj2.documents_path, doc_name), "w", encoding="utf-8") as handle:
+            handle.write(doc_name)
+        proj2._register_document(doc_name)
+    proj2.add_code("Importado")
+    proj2.save_project_data(
+        ["doc1.txt", "doc2.txt", "doc3.txt"],
+        {},
+        doc_groups={"__root__": ["doc1.txt", "doc2.txt", "doc3.txt"]},
+    )
+    rqa_path = str(tmp_path / "proj2_copy_failure.rqa")
+    ExportManager.export_project_to_rqa(str(tmp_path / "Proj2"), rqa_path)
+
+    real_copy2 = merge_manager_module.shutil.copy2
+
+    def fail_on_third_document(src, dst, *args, **kwargs):
+        if os.path.basename(src) == "doc3.txt":
+            raise OSError("fallo de copia simulado")
+        return real_copy2(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(merge_manager_module.shutil, "copy2", fail_on_third_document)
+
+    with pytest.raises(OSError, match="fallo de copia simulado"):
+        MergeManager.merge_projects(proj1, rqa_path, {"dont_import_existing_docs": True})
+
+    assert not os.path.exists(os.path.join(proj1.documents_path, "doc2.txt"))
+    assert not os.path.exists(os.path.join(proj1.documents_path, "doc3.txt"))
+    with open(proj1.metadata_path, "r", encoding="utf-8") as handle:
+        assert json.load(handle)["documents"] == ["doc1.txt"]
+    assert set(proj1.codes_dict) == {"Local"}
+
 def test_merge_themes_rule(tmp_path):
     """
     Regla: Temas con mismo nombre se fusionan, combinando los códigos que contienen

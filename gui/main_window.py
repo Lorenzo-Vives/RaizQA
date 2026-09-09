@@ -1050,31 +1050,41 @@ class RaizQAGUI(QMainWindow):
 
         item = self.code_tree.itemAt(pos)
         code_name = self._code_item_name(item) if item else None
+        is_code_item = bool(
+            item
+            and item.data(0, Qt.UserRole) == "code"
+            and code_name in self.codes_dict
+        )
         menu = QMenu(self)
         add_code_action = menu.addAction("Agregar código")
         rename_action = None
+        change_color_action = None
         view_fragments_action = None
         delete_code_action = None
         view_memo_action = None
         add_memo_action = None
         delete_memo_action = None
 
-        if item and self.memo_manager:
+        if is_code_item:
             menu.addSeparator()
             rename_action = menu.addAction("Renombrar codigo")
+            change_color_action = menu.addAction("Cambiar color")
             view_fragments_action = menu.addAction("Ver fragmentos")
             delete_code_action = menu.addAction("🗑️ Eliminar código")
-            menu.addSeparator()
 
-            view_memo_action = menu.addAction("👁️ Ver memo")
-            add_memo_action = menu.addAction("📝 Agregar / editar memo")
-            delete_memo_action = menu.addAction("❌ Eliminar memo")
+            if self.memo_manager:
+                menu.addSeparator()
+                view_memo_action = menu.addAction("👁️ Ver memo")
+                add_memo_action = menu.addAction("📝 Agregar / editar memo")
+                delete_memo_action = menu.addAction("❌ Eliminar memo")
 
         action = menu.exec(self.code_tree.viewport().mapToGlobal(pos))
         if action == add_code_action:
             self.prompt_add_code(parent_item=item)
         elif action == rename_action:
             self._start_code_rename(item)
+        elif action == change_color_action:
+            self.change_code_color(code_name)
         elif action == delete_code_action:
             children = self.codes_dict.get(code_name, {}).get("children", [])
             if children:
@@ -1103,6 +1113,28 @@ class RaizQAGUI(QMainWindow):
             self.add_or_edit_memo(code_name)
         elif action == delete_memo_action:
             self.delete_memo(code_name)
+
+    def change_code_color(self, code_name):
+        """Actualiza el color de un código y repinta sus fragmentos visibles."""
+        code_data = self.get_code_data(code_name)
+        if not code_data:
+            return
+
+        current_color = code_data.get("hexcolor", "#fff59d")
+        selected_color = self.ask_color_from_palette(current_color)
+        if not selected_color or selected_color == current_color:
+            return
+
+        memo_text = code_data.get("memo", "")
+        if self.memo_manager:
+            memo_text = self.memo_manager.get_memo(code_name)
+
+        self.signal_req_update_code.emit(
+            code_name,
+            code_name,
+            selected_color,
+            memo_text,
+        )
 
     def view_memo(self, code_name):
         if not self.memo_manager:
@@ -1643,7 +1675,97 @@ class RaizQAGUI(QMainWindow):
         return "__root__"
 
     def _rebuild_codes_from_tree(self):
-        pass
+        """Sincroniza la jerarquía visual de códigos y temas con las EDDs."""
+        if not self.current_project:
+            return False
+
+        parent_by_code = {}
+        ordered_codes = []
+        theme_rows = []
+        invalid_structure = False
+
+        theme_memos = {
+            theme.get("name"): theme.get("memo", "")
+            for theme in getattr(self, "code_themes", [])
+            if isinstance(theme, dict) and theme.get("name")
+        }
+
+        def visit_code(item, parent_code=None, theme_codes=None):
+            nonlocal invalid_structure
+            if item.data(0, Qt.UserRole) != "code":
+                invalid_structure = True
+                return
+
+            code_name = self._code_item_name(item)
+            if code_name not in self.codes_dict or code_name in parent_by_code:
+                invalid_structure = True
+                return
+
+            parent_by_code[code_name] = parent_code
+            ordered_codes.append(code_name)
+            if parent_code is None and theme_codes is not None:
+                theme_codes.append(code_name)
+
+            for child_index in range(item.childCount()):
+                visit_code(item.child(child_index), code_name, theme_codes)
+
+        for top_index in range(self.code_tree.topLevelItemCount()):
+            item = self.code_tree.topLevelItem(top_index)
+            item_type = item.data(0, Qt.UserRole)
+            if item_type == "theme":
+                theme_name = item.text(0).strip()
+                theme_codes = []
+                theme_rows.append({
+                    "name": theme_name,
+                    "memo": theme_memos.get(
+                        theme_name,
+                        self.themes_dict.get(theme_name, {}).get("memo", ""),
+                    ),
+                    "codes": theme_codes,
+                })
+                for child_index in range(item.childCount()):
+                    visit_code(item.child(child_index), None, theme_codes)
+            elif item_type == "code":
+                visit_code(item)
+            else:
+                invalid_structure = True
+
+        if set(parent_by_code) != set(self.codes_dict):
+            invalid_structure = True
+
+        # La vista de Qt ya es un árbol, pero verificamos igualmente los padres
+        # antes de trasladarlos al modelo para tolerar estados manipulados.
+        for code_name, parent_name in parent_by_code.items():
+            seen = {code_name}
+            cursor = parent_name
+            while cursor:
+                if cursor in seen or cursor not in parent_by_code:
+                    invalid_structure = True
+                    break
+                seen.add(cursor)
+                cursor = parent_by_code[cursor]
+
+        if invalid_structure:
+            return False
+
+        for code_data in self.codes_dict.values():
+            code_data["parent"] = None
+            code_data["children"] = []
+
+        for code_name in ordered_codes:
+            parent_name = parent_by_code[code_name]
+            self.codes_dict[code_name]["parent"] = parent_name
+            if parent_name:
+                self.codes_dict[parent_name]["children"].append(code_name)
+
+        self.codes_dict = {
+            code_name: self.codes_dict[code_name]
+            for code_name in ordered_codes
+        }
+        self.current_project.codes_dict = self.codes_dict
+        self.code_themes = self.current_project.sync_themes(theme_rows)
+        self.themes_dict = self.current_project.themes_dict
+        return True
 
     def _configure_code_item(self, item):
         flags = item.flags()
@@ -1865,8 +1987,13 @@ class RaizQAGUI(QMainWindow):
         self._zoom_level = 0
 
     def _on_code_tree_drop(self):
-        self._rebuild_codes_from_tree()
-        self.save_project()
+        if self._rebuild_codes_from_tree():
+            self.save_project()
+            return
+
+        # Un destino inválido no debe contaminar el modelo. Restauramos el
+        # árbol en el siguiente ciclo para no modificarlo dentro de dropEvent.
+        QTimer.singleShot(0, self.populate_code_tree)
 
 
     # -------------------- IMPORTAR ARCHIVO --------------------
@@ -2178,16 +2305,9 @@ class RaizQAGUI(QMainWindow):
         self.add_to_existing_code(code_name, note, None, None, is_image=True, note=note, image_selection=selection)
 
     def create_subcode_for_image(self, image_selection=None):
-        iterator = QTreeWidgetItemIterator(self.code_tree)
-        code_names = []
-        while iterator.value():
-            item = iterator.value()
-            name = self._code_item_name(item)
-            if name and self.codes_dict.get(name, {}).get("parent") is None:
-                code_names.append(name)
-            iterator += 1
+        code_names = self._available_parent_code_names()
         if not code_names:
-            QMessageBox.warning(self, "Subcódigo", "Primero crea un código principal (no se permiten subcódigos de subcódigos).")
+            QMessageBox.warning(self, "Subcódigo", "Primero crea un código.")
             return
 
         parent_name, ok = QInputDialog.getItem(self, "Subcódigo", "Selecciona código padre:", code_names, 0, False)
@@ -2236,12 +2356,7 @@ class RaizQAGUI(QMainWindow):
 
         self._color_index += 1
         
-        parent_name = ""
-        if parent_item and parent_item.data(0, Qt.UserRole) == "code":
-            parent_name = parent_item.data(0, Qt.UserRole + 1)
-            # Solo permitir un nivel de anidamiento
-            if self.codes_dict.get(parent_name, {}).get("parent") is not None:
-                parent_name = self.codes_dict[parent_name]["parent"]
+        parent_name = self._parent_name_from_item(parent_item)
         
         # Emitir señal al backend con el memo incluido
         self.signal_req_add_code.emit(code_label, color_hex, memo, parent_name)
@@ -2276,12 +2391,7 @@ class RaizQAGUI(QMainWindow):
         self._color_index += 1
 
         # 1. Crear el código en el backend
-        parent_name = ""
-        if parent_item and parent_item.data(0, Qt.UserRole) == "code":
-            parent_name = parent_item.data(0, Qt.UserRole + 1)
-            # Solo permitir un nivel de anidamiento
-            if self.codes_dict.get(parent_name, {}).get("parent") is not None:
-                parent_name = self.codes_dict[parent_name]["parent"]
+        parent_name = self._parent_name_from_item(parent_item)
         self.signal_req_add_code.emit(code_label, color_hex, memo, parent_name)
         
         # 2. Construir el paquete de datos del fragmento
@@ -2442,16 +2552,9 @@ class RaizQAGUI(QMainWindow):
         return fragment.get("color", "#fff59d")
 
     def create_subcode(self, selected_text, start, end):
-        iterator = QTreeWidgetItemIterator(self.code_tree)
-        code_names = []
-        while iterator.value():
-            item = iterator.value()
-            name = self._code_item_name(item)
-            if name and self.codes_dict.get(name, {}).get("parent") is None:
-                code_names.append(name)
-            iterator += 1
+        code_names = self._available_parent_code_names()
         if not code_names:
-            QMessageBox.warning(self, "Subcódigo", "Primero crea un código principal (no se permiten subcódigos de subcódigos).")
+            QMessageBox.warning(self, "Subcódigo", "Primero crea un código.")
             return
 
         parent_name, ok = QInputDialog.getItem(self, "Subcódigo", "Selecciona código padre:", code_names, 0, False)
@@ -2461,6 +2564,26 @@ class RaizQAGUI(QMainWindow):
         parent_item = self.find_tree_item(parent_name)
         if parent_item:
             self.create_new_code(selected_text, start, end, parent_item=parent_item)
+
+    def _available_parent_code_names(self):
+        """Devuelve los códigos visibles que pueden recibir un subcódigo."""
+        code_names = []
+        iterator = QTreeWidgetItemIterator(self.code_tree)
+        while iterator.value():
+            item = iterator.value()
+            if item.data(0, Qt.UserRole) == "code":
+                name = self._code_item_name(item)
+                if name in self.codes_dict and name not in code_names:
+                    code_names.append(name)
+            iterator += 1
+        return code_names
+
+    def _parent_name_from_item(self, parent_item):
+        """Obtiene el padre exacto seleccionado, sin limitar su profundidad."""
+        if not parent_item or parent_item.data(0, Qt.UserRole) != "code":
+            return ""
+        parent_name = self._code_item_name(parent_item)
+        return parent_name if parent_name in self.codes_dict else ""
 
     def find_tree_item(self, code_name):
         iterator = QTreeWidgetItemIterator(self.code_tree)

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from core.export_manager import ExportManager
 from core.import_manager import ImportManager
+from core.project import Project
 
 def test_export_project_to_rqa(tmp_path):
     """Prueba que un directorio de proyecto se empaquete correctamente en formato .rqa."""
@@ -82,3 +83,54 @@ def test_import_missing_metadata(tmp_path):
         
     with pytest.raises(ValueError, match="no contiene 'metadata.json'"):
         ImportManager.import_project_from_rqa(str(rqa_path), str(tmp_path))
+
+
+def test_import_exchange_merges_image_fragments_without_text_positions(tmp_path):
+    """El intercambio comparte la deduplicación segura de zonas de imagen."""
+    target = Project("Target", str(tmp_path))
+    source = Project("Source", str(tmp_path))
+    doc_name = "imagen.png"
+    for project in (target, source):
+        Path(project.documents_path, doc_name).write_bytes(b"png")
+        project._register_document(doc_name)
+        project.add_code("Visual")
+
+    shared = {
+        "type": "image",
+        "rect": {"x": 1, "y": 2, "w": 30, "h": 40},
+        "image_size": {"w": 640, "h": 480},
+        "note": "Compartida",
+    }
+    target.add_fragment("Visual", doc_name, shared)
+    source.add_fragment("Visual", doc_name, dict(shared))
+    source.add_fragment("Visual", doc_name, {
+        "type": "image",
+        "rect": {"x": 50, "y": 60, "w": 70, "h": 80},
+        "image_size": {"w": 640, "h": 480},
+        "note": "Nueva",
+    })
+    target.save_project_data([doc_name], {})
+    source.save_project_data([doc_name], {})
+
+    rex_path = str(tmp_path / "images.rex")
+    ExportManager.export_exchange_to_rex(
+        source,
+        [doc_name],
+        ["Visual"],
+        {},
+        rex_path,
+    )
+    ImportManager.import_exchange_from_rex(
+        rex_path,
+        target,
+        {
+            "documents": [doc_name],
+            "codes": ["Visual"],
+            "import_fragments": True,
+            "import_memos": False,
+        },
+    )
+
+    fragments = target.codes_dict["Visual"]["fragments"][doc_name]
+    assert len(fragments) == 2
+    assert {fragment["note"] for fragment in fragments} == {"Compartida", "Nueva"}

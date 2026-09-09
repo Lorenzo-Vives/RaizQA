@@ -69,3 +69,15 @@ def test_add_duplicate_code(temp_project):
     # En Project.add_code, chequea if code_name not in self.codes_dict
     assert temp_project.codes_dict["Duplicado"]["hexcolor"] == "#111111"
     assert temp_project.codes_dict["Duplicado"]["memo"] == "Original"
+
+
+def test_add_code_supports_deep_hierarchies(temp_project):
+    """Los códigos pueden anidarse sin un límite artificial de dos niveles."""
+    parent = None
+    for level in range(1, 6):
+        code_name = f"Nivel {level}"
+        temp_project.add_code(code_name, parent_name=parent)
+        assert temp_project.codes_dict[code_name]["parent"] == parent
+        if parent:
+            assert code_name in temp_project.codes_dict[parent]["children"]
+        parent = code_name

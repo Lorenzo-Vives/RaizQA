@@ -12,30 +12,42 @@ RaizQA 🌱 es una aplicacion de analisis cualitativo escrita en Python con PySi
 
 ### macOS
 
-- Usando la terminal [cmd + espacio] → escribe “Terminal” → Enter.
-- copia y pega el siguiente comando para descargar la última versión de RaizQA:
+Sigue estos pasos en orden. Solo necesitas copiar y pegar cada comando en la
+Terminal.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/Lorenzo-Vives/RaizQA/main/install_mac.sh | bash
-```
-La primera instalación puede tardar algunos minutos.
+1. Abre la Terminal: presiona `Command (⌘) + Espacio`, escribe `Terminal` y
+   presiona Enter.
 
-* Si no tienes Git o Python instalados, ejecuta primero:
+2. Instala las herramientas básicas de Apple:
 
 ```bash
 xcode-select --install
 ```
-Luego instala Homebrew:
+
+Se abrirá una ventana. Acepta la instalación y espera a que termine. Si macOS
+indica que las herramientas ya están instaladas, continúa con el paso siguiente.
+
+3. Instala Homebrew, que permite a RaizQA preparar Python automáticamente:
 
 ```bash
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 ```
-Finalmente, instala Python:
+
+Sigue las instrucciones que aparezcan en la Terminal y espera hasta que el
+proceso termine.
+
+4. Instala RaizQA:
 
 ```bash
-brew install python
+curl -fsSL https://raw.githubusercontent.com/Lorenzo-Vives/RaizQA/main/install_mac.sh | bash
 ```
-Después, vuelve a ejecutar el comando de instalación de RaizQA.
+
+El instalador comprobará Python y, si hace falta, instalará automáticamente una
+versión compatible. La primera instalación puede tardar algunos minutos.
+
+Cuando termine, RaizQA se abrirá y quedará un acceso directo llamado
+`RaizQA.app` en el Escritorio. Para actualizar RaizQA en el futuro, vuelve a
+ejecutar solamente el comando del paso 4.
 
 ### Linux 
 Para instalar RaizQA en Linux desde cero, clona el repositorio y monta un entorno virtual de Python siguiendo estos pasos:
